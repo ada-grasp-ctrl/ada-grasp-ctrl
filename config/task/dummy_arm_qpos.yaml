@@ -1,0 +1,2 @@
+max_num: 1000
+device: "cuda:0"

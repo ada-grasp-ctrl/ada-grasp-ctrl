@@ -1,0 +1,14 @@
+xml_path: assets/hand/dummy_arm_allegro/right.xml 
+mocap: False
+dummy_arm: True
+exclude_table_contact: 
+color: [0.0544794, 0.376262, 0.913099, 1.0]
+finger_prefix: ['ff','mf', 'rf', 'th']
+valid_body_name: [
+    'palm', 
+    'ff_proximal', 'ff_medial', 'ff_distal', 'ff_tip',
+    'mf_proximal', 'mf_medial', 'mf_distal', 'mf_tip',
+    'rf_proximal', 'rf_medial', 'rf_distal', 'rf_tip',
+    'th_proximal', 'th_medial', 'th_distal', 'th_tip',
+]
+tip_body_name: ['ff_tip','mf_tip','rf_tip','th_tip']

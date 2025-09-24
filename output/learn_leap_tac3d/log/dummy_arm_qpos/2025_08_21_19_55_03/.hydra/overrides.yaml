@@ -1,0 +1,5 @@
+- setting=tabletop
+- hand=leap_tac3d
+- task=dummy_arm_qpos
+- exp_name=learn
+- task.max_num=-1

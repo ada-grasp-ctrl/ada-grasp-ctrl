@@ -1,0 +1,5 @@
+from .tabletop_dummy_arm_op import tabletopDummyArmOpEval
+from .tabletop_dummy_arm_ours import tabletopDummyArmOursEval
+from .tabletop_dummy_arm_bs1 import tabletopDummyArmBS1Eval
+from .tabletop_dummy_arm_bs2 import tabletopDummyArmBS2Eval
+from .tabletop_dummy_arm_bs3 import tabletopDummyArmBS3Eval

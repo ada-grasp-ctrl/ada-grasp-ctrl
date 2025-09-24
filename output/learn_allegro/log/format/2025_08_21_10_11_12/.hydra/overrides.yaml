@@ -1,0 +1,7 @@
+- setting=tabletop
+- hand=allegro
+- task=format
+- exp_name=learn
+- task.data_name=Learning
+- task.max_num=100
+- task.data_path=../DexLearn/output/bodex_tabletop_allegro_nflow_debug1/tests/step_050000

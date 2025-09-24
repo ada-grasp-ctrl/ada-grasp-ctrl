@@ -1,0 +1,6 @@
+method: ours
+ablation_name: default
+
+lift_height: 0.2
+n_terminal_steps: 5
+setting_name: dist_0

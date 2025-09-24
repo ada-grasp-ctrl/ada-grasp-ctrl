@@ -1,0 +1,17 @@
+# https://black.readthedocs.io/en/stable/the_black_code_style/current_style.html
+[tool.black]
+line-length = 120
+skip-magic-trailing-comma = false  # 保持默认
+skip-string-normalization = false  # 保持默认
+# 关键配置：让 Black 忽略注释长度
+experimental-string-processing = false  # 禁用实验性字符串处理（可能影响注释换行）
+
+# https://beta.ruff.rs/docs/settings/
+[tool.ruff]
+line-length = 120
+# https://beta.ruff.rs/docs/rules/
+select = ["E", "W", "F"]
+ignore = ["F401"]
+# Exclude a variety of commonly ignored directories.
+respect-gitignore = true
+ignore-init-module-imports = true

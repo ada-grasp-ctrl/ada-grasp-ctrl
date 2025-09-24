@@ -1,0 +1,8 @@
+xml_path: assets/hand/dummy_arm_leap_tac3d/leap_tac3d.xml
+mocap: False
+dummy_arm: True
+exclude_table_contact: 
+color: [0.132868, 0.496933, 0.144129, 1.0]
+finger_prefix: 
+valid_body_name: 
+tip_body_name: 

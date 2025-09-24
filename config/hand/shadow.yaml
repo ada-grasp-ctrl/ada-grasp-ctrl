@@ -1,0 +1,14 @@
+xml_path: assets/hand/shadow/right_hand.xml 
+mocap: True
+exclude_table_contact: 
+color: [0.863157, 0.0865002, 0.0802199, 1.0]
+finger_prefix: ['rh_ff', 'rh_mf', 'rh_rf', 'rh_lf', 'rh_th']
+valid_body_name: [
+    'rh_palm', 
+    'rh_ffproximal', 'rh_ffmiddle', 'rh_ffdistal',
+    'rh_mfproximal', 'rh_mfmiddle', 'rh_mfdistal',
+    'rh_rfproximal', 'rh_rfmiddle', 'rh_rfdistal',
+    'rh_lfmetacarpal', 'rh_lfproximal', 'rh_lfmiddle', 'rh_lfdistal',
+    'rh_thproximal', 'rh_thmiddle', 'rh_thdistal',
+]
+tip_body_name: ['rh_ffdistal','rh_mfdistal','rh_rfdistal','rh_lfdistal','rh_thdistal']
