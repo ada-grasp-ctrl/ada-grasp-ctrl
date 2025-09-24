@@ -149,8 +149,10 @@ python script/quick_grasp_vis/vis_dexlearn_grasp.py # need internal modification
 ```
 
 ## Notice
+
 * While support for underactuated hands is theoretically available, the current code does not fully account for them. We are working on enabling this.
 
+We are actively working on optimizing and refining the code until the paper is accepted. If you encounter any issues, please feel free to open an issue — your feedback helps us improve the project.
 
 
 ## Acknowledgement

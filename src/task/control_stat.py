@@ -163,11 +163,6 @@ def get_control_results(data_lst, configs):
     with open(save_path, "w") as f:
         yaml.safe_dump(stat_results, f, sort_keys=False)
 
-    # index = success_cases[np.argmax(err_obj_angle_all)]
-    # grasp_id = index // 8
-    # pos_id = index % 8
-    # print(f"max obj rot err: {np.max(err_obj_angle_all)}, grasp_id: {grasp_id}, pos_id: {pos_id}")
-
 
 def task_control_stat(configs):
     control_lst = glob(os.path.join(configs.control_dir, "**/*.npy"), recursive=True)
@@ -180,7 +175,6 @@ def task_control_stat(configs):
     setting_name = configs.task.setting_name
 
     control_lst = [p for p in control_lst if Path(p).match(f"*/{method}/*.npy") and setting_name in p]
-    # control_lst = [x for x in control_lst if method in x and "pos_0" not in x]
     control_lst = sorted(control_lst)
     logging.info(f"Find {len(control_lst)} grasp data using control method '{method}' in {configs.control_dir}.")
 
