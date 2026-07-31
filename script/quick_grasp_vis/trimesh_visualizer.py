@@ -8,6 +8,26 @@ import pytorch_kinematics as pk
 import numpy as np
 
 
+def load_mjcf_with_absolute_meshdir(mjcf_path):
+    """Serialize MJCF with a mesh directory safe for string-based parsing.
+
+    Args:
+        mjcf_path: Source MJCF path.
+
+    Returns:
+        XML text whose compiler mesh directory is absolute.
+    """
+    path = os.path.abspath(mjcf_path)
+    tree = ET.parse(path)
+    root = tree.getroot()
+    compiler = root.find("compiler")
+    if compiler is not None and compiler.get("meshdir"):
+        meshdir = compiler.get("meshdir")
+        if not os.path.isabs(meshdir):
+            compiler.set("meshdir", os.path.abspath(os.path.join(os.path.dirname(path), meshdir)))
+    return ET.tostring(root, encoding="unicode")
+
+
 def get_trimesh_from_mjmodel_mesh(model, mesh_id):
     """
     Convert a MuJoCo mesh (by mesh_id) to a trimesh.Trimesh object.
@@ -39,8 +59,6 @@ def extract_mesh_info_from_mjcf(mjcf_path):
         body_name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, body_id)
 
         mesh_id = model.geom_dataid[geom_id]
-        mesh_name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_MESH, mesh_id)
-
         mesh_scale = model.mesh_scale[mesh_id].tolist()
         pos = model.geom_pos[geom_id].tolist()
 
@@ -60,7 +78,7 @@ def extract_mesh_info_from_mjcf(mjcf_path):
 class Visualizer:
     def __init__(self, robot_mjcf_path, device="cpu"):
         self.chain = pk.build_chain_from_mjcf(
-            data=open(robot_mjcf_path).read(),
+            data=load_mjcf_with_absolute_meshdir(robot_mjcf_path),
         ).to(dtype=torch.float, device=device)
 
         # Extract mesh info and Mujoco model object
@@ -113,7 +131,7 @@ class Visualizer:
 
         self.current_status = self.chain.forward_kinematics(chain_qpos)
 
-    def get_robot_trimesh_data(self, i, color=None):
+    def get_robot_trimesh_data(self, index, color=None):
         """
         Get full mesh
 
@@ -125,25 +143,9 @@ class Visualizer:
         for link_name in self.robot_mesh:
             v = self.current_status[link_name].transform_points(self.robot_mesh[link_name]["vertices"])
             if len(v.shape) == 3:
-                v = v[i]
-            v = v @ self.global_rotation[i].T + self.global_translation[i]
+                v = v[index]
+            v = v @ self.global_rotation[index].T + self.global_translation[index]
             v = v.detach().cpu()
             f = self.robot_mesh[link_name]["faces"].detach().cpu()
             data += tm.Trimesh(vertices=v, faces=f, face_colors=color)
         return data
-
-
-if __name__ == "__main__":
-    robot_urdf_path = "src/curobo/content/assets/robot/leap_description/leap_tac3d_v0.urdf"
-    mesh_dir_path = "src/curobo/content/assets/robot/leap_description/"
-
-    visualize = Visualizer(robot_urdf_path=robot_urdf_path, mesh_dir_path=mesh_dir_path)
-
-    hand_pose = torch.zeros((1, 3 + 4 + 16))
-    hand_pose[:, 3] = 1.0
-    visualize.set_robot_parameters(hand_pose)
-
-    robot_mesh = visualize.get_robot_trimesh_data(i=0)
-
-    scene = tm.Scene(geometry=[robot_mesh])
-    scene.show()

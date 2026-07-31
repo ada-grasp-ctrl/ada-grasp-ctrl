@@ -1,165 +1,208 @@
 # Coordinated Contact Control for Adaptive Dexterous Grasping Under Uncertainty
 
-[[Project Website](https://ada-grasp-ctrl.github.io/)]
+[Project website](https://ada-grasp-ctrl.github.io/)
 
-<div align="center">
-  <img src="./docs/sim_diverse_grasps.jpg" alt="Diverse grasps" width="100%" />
-</div>
+Ada Grasp Ctrl is the reference implementation of coordinated contact control for dexterous grasp execution. The maintained application is a reproducible four-stage pipeline:
 
-<div align="center">
-  <img src="./docs/overview.jpg" alt="Overview of our method" width="100%" />
-</div>
-
-
-## Getting Started
-
-### Installation
-1. Clone this repo.
-1. Clone the third-party library [MuJoCo Menagerie](https://github.com/google-deepmind/mujoco_menagerie).
-  ```
-  git submodule update --init --recursive --progress
-  ```
-2. Third party:
-  ```bash
-  cd third_party
-  # pytorch_kinematics
-  git clone git@github.com:DexGrasp-TH/pytorch_kinematics.git
-  cd pytorch_kinematics
-  git checkout v1.0.0
-  pip install -e .
-
-  # mr_utils
-  cd third_party
-  git clone git@github.com:Mingrui-Yu/utils_python.git
-  cd utils_python
-  pip install -e .
-  ```
-3. Install the python environment via [Anaconda](https://www.anaconda.com/). 
-  ```bash
-  conda create -n DGBench python=3.10 
-  conda activate DGBench
-  pip install numpy==1.26.4
-  conda install pytorch==2.2.2 pytorch-cuda=12.1 -c pytorch -c nvidia 
-  pip install mujoco==3.3.2
-  pip install trimesh
-  pip install hydra-core
-  pip install transforms3d
-  pip install matplotlib
-  pip install scikit-learn
-  pip install usd-core
-  pip install imageio
-  pip install 'qpsolvers[clarabel]'
-  pip install tqdm
-  conda install pinocchio -c conda-forge
-  ```
-
-### Object Preparation
-For the object assets used in [BODex](https://pku-epic.github.io/BODex/), please download the pre-processed object assets `DGN_2k_processed.zip` from [here](https://huggingface.co/datasets/JiayiChenPKU/BODex) and organize the unzipped folders as below. 
-```
-assets/object/DGN_2k
-|- processed_data
-|  |- core_bottle_1a7ba1f4c892e2da30711cdbdbc73924
-|  |_ ...
-|- scene_cfg
-|  |- core_bottle_1a7ba1f4c892e2da30711cdbdbc73924
-|  |_ ...
-|- valid_split
-|  |- all.json
-|  |_ ...
+```text
+raw grasp → format → dummy_arm_qpos → control_eval → control_stat
 ```
 
-## Usage
+The supported matrix is Shadow, Allegro, and LEAP Tac3D hands (plus their dummy-arm models), the `ours`, `op`, `bs1`, `bs2`, and `bs3` control methods, and BODex, Learning, and Batched input converters. Underactuated hands and the former `eval`, `stat`, `vobj`, `vusd`, and `collect` prototype tasks are not supported.
 
-### Complete pipeline
-1. Use [BODex](https://github.com/JYChen18/BODex) to synthesize tabletop grasp poses.
-1. Use [DexLearn](https://github.com/JYChen18/DexLearn) to train a generative network.
-1. Use DexLearn to sample grasp poses from single-view point clouds.
-1. Use this repo to evaluate the grasping execution methods.
+![Diverse grasps](docs/sim_diverse_grasps.jpg)
 
-### Architecture
-* The core fucntions of the grasp controller are at `src/util/grasp_controller.py`.
-* The code of our method and baselines are at `src/task/control_eval_func/`.
-* The core code related to mujoco simualtion is at `src/util/hand_util.py`.
+## Installation and preflight
 
-### Evaluation of the grasping execution methods
-
-The complete procedures for evaluation include the following steps:
-
-#### format: convert the data format
-
-Sample evaluation dataset from the generated grasp poses.
+The maintained environment is Linux x86-64, Python 3.10, an NVIDIA GPU, and a driver compatible with CUDA 12.1. The headless control simulation itself uses MuJoCo on CPU; the full `dummy_arm_qpos` stage uses CUDA IK.
 
 ```bash
-python src/main.py setting=tabletop hand=shadow task=format exp_name=learn task.data_name=Learning task.max_num=100 task.data_path=<PATH_TO_GENERATED_GRASPS>
-```
-Args:
-* max_num: the amount of sampled grasps for evaluation. 
-* data_path: path to generated grasps. e.g., `../DexLearn/output/bodex_tabletop_allegro_nflow_debug/tests/step_050000`
+git clone --recurse-submodules https://github.com/ada-grasp-ctrl/ada-grasp-ctrl.git
+cd ada-grasp-ctrl
+conda env create -f environment.yml
+conda activate ada-grasp-ctrl
 
-We provide pre-sampled 100 grasps of each hand in `output/learn_shadow`, `output/learn_allegro`, and `output/learn_leap_tac3d`. You can skip this step if you only want to use this example evaluation dataset.
-
-#### dummy_arm_qpos: calculate the qpos of the dummy_arm via IK
-
-We add a dummy arm to the hand to control the hand base in simulation, which consists of three prismatic joints and three revolute joints. Thus, we need to calculate the arm joint positions corresponding to the generated grasp poses via inverse kinematics.
-
-```bash
-python src/main.py setting=tabletop hand=shadow task=dummy_arm_qpos exp_name=learn task.max_num=-1
+python -c "import torch, mujoco, pinocchio, ada_grasp_ctrl; print(torch.__version__, torch.version.cuda)"
+ada-grasp-ctrl --help
 ```
 
-You may need to re-run it if the IK fails occasionally.
-
-#### control_eval: evaluate the execution method and save the manipulation data
+For an existing clone, synchronize the pinned submodules first:
 
 ```bash
-python src/main.py setting=tabletop hand=dummy_arm_shadow task=control_eval exp_name=learn task.method=ours task.input_data=grasp_dir task.debug_viewer=True
+git submodule sync --recursive
+git submodule update --init --recursive --progress
 ```
-Args:
-* task.method: (ours / op / bs1 / bs2 / bs3)
-* task.offsets: the position perturbation distance ([0.00] / [0.02])
-* task.debug_viewer: whether launch the mujoco viewer
 
-#### control_stat: compute and save the statistic results.
+`python src/main.py ...` remains a compatible wrapper around the installed `ada-grasp-ctrl` command. Paths are resolved from the repository root, so invocation does not depend on the shell's current directory.
+
+## 60-second quick start
+
+The repository contains an authorized minimal DGN bottle object and one precomputed dummy-arm grasp for each supported hand. Quick mode runs `control_eval → control_stat` headlessly and writes only below `output/example_<hand>`:
+
 ```bash
-python src/main.py setting=tabletop hand=dummy_arm_shadow task=control_stat exp_name=learn task.method=ours
+bash script/run_example.sh shadow quick
+bash script/run_example.sh allegro quick
+bash script/run_example.sh leap_tac3d quick
 ```
-Args:
-* task.method: (ours / op / bs1 / bs2 / bs3)
-* task.setting_name: (dist_0 / dist_2) corresponds to the position perturbation distance.
 
-### Quick use
+The historical wrapper names invoke the same quick mode:
 
-You can run the above commands using the following bash scripts:
 ```bash
-# The `format` task is commented out by default
 bash script/test_learning_dummy_arm_shadow.sh
 bash script/test_learning_dummy_arm_allegro.sh
 bash script/test_learning_dummy_arm_leap_tac3d.sh
 ```
 
+Full mode starts from the included raw Learning fixture, formats it, runs CUDA IK, then evaluates and summarizes it:
 
-After generating the qpos of dummy arms, the control_eval and control_stat under different conditions can be conveniently run via the following scripts:
 ```bash
-python script/test_all_ablation_baseline_local.py # may need internal modification of the settings
+bash script/run_example.sh shadow full
 ```
 
-### Quick visualizion of static grasps via trimesh
-For a quick visualization of the generated grasp poses from DexLearn, you can use:
+At completion the script prints the output directory, episode status, lift result, statistics file, and success-rate denominator. Exit code `1` means all possible samples were processed but at least one execution error or solver degradation occurred; inspect the reports described below.
+
+The bundled data is not relicensed by the source MIT License. Its source, authorization scope, and checksums are recorded in [the object attribution](examples/assets/object/core_bottle_15787789482f045d8add95bf56d3d2fa/ATTRIBUTION.md).
+
+## Complete four-stage pipeline
+
+### 1. Convert raw grasps
+
 ```bash
-python script/quick_grasp_vis/vis_dexlearn_grasp.py # need internal modification of the grasp file path
+ada-grasp-ctrl setting=tabletop hand=shadow task=format exp_name=learn \
+  task.data_name=Learning task.max_num=100 task.data_path=<RAW_GRASP_DIRECTORY>
 ```
 
-## Notice
+`task.data_name` is one of `BODex`, `Learning`, or `Batched`. `task.max_num<=0` processes all inputs. An empty raw input is a preflight error. New outputs include `schema_version: 1`; legacy files without a version continue to load as v0.
 
-* While support for underactuated hands is theoretically available, the current code does not fully account for them. We are working on enabling this.
+### 2. Calculate dummy-arm qpos
 
-We are actively working on optimizing and refining the code until the paper is accepted. If you encounter any issues, please feel free to open an issue — your feedback helps us improve the project.
+```bash
+ada-grasp-ctrl setting=tabletop hand=shadow task=dummy_arm_qpos exp_name=learn \
+  task.max_num=-1 task.device=cuda:0
+```
 
+The six-DoF dummy arm maps a sampled hand base pose to simulation joints. Outputs are generated below the explicit `dummy_arm_grasp_dir`; the implementation never derives paths by replacing hand-name substrings.
 
-## Acknowledgement
+### 3. Evaluate a controller
 
-This evaluation codebase is built upon [DexGraspBench](https://github.com/JYChen18/DexGraspBench)
- — many thanks to the authors for their great work.
+```bash
+ada-grasp-ctrl setting=tabletop hand=dummy_arm_shadow task=control_eval exp_name=learn \
+  task.method=ours task.input_data=grasp_dir task.offsets='[0.0]' \
+  task.debug_viewer=false
+```
 
+`task.method` accepts `ours`, `op`, `bs1`, `bs2`, or `bs3`. `ours` and `bs2` share one implementation; BS2's only policy difference is disabling dummy-arm motion in Stage 1. Paper hyperparameters, friction coefficients, controller objectives, and lift threshold are unchanged. The corrected wrench-balance gradient and rejected-solver fallback can intentionally change trajectories that depended on the former invalid derivative or an infeasible solution.
 
+For native interactive visualization:
 
+```bash
+ada-grasp-ctrl setting=tabletop hand=dummy_arm_shadow task=control_eval exp_name=learn \
+  task.method=ours task.debug_viewer=true task.debug_viewer_backend=mujoco
+```
 
+For a persistent browser viewer on a headless server:
+
+```bash
+ada-grasp-ctrl setting=tabletop hand=dummy_arm_shadow task=control_eval exp_name=learn \
+  task.method=ours task.debug_viewer=true task.debug_viewer_backend=mjviser \
+  task.mjviser.host=127.0.0.1 task.mjviser.port=8080
+ssh -L 8080:127.0.0.1:8080 <server>
+```
+
+Use the actual URL printed by mjviser if the preferred port was occupied.
+
+### 4. Compute statistics
+
+```bash
+ada-grasp-ctrl setting=tabletop hand=dummy_arm_shadow task=control_stat exp_name=learn \
+  task.method=ours task.setting_name=dist_0
+```
+
+The historical YAML keys remain available. New counts distinguish `success`, `failure`, `invalid_initialization`, `solver_degraded`, and `execution_error`. The primary success-rate denominator is `success + failure`; invalid initialization and solver degradation are excluded. Empty or all-invalid result sets use YAML `null` for undefined rates and continuous metrics, never NaN.
+
+## Data schemas and diagnostics
+
+A formatted grasp record requires:
+
+- `obj_path`, `obj_scale`, and a seven-value WXYZ `obj_pose`;
+- one-dimensional, equally sized `pregrasp_qpos`, `grasp_qpos`, and `squeeze_qpos`;
+- optional `joint_names`, whose length must equal qpos length;
+- `schema_version: 1` for new files.
+
+A control record keeps the historical trajectories (`obj_pose`, `dof`, `doa`, `contacts`, and planned/optimization fields) and adds `schema_version`, `episode_status`, and `solver_diagnostics`. A rejected SLSQP result is never applied: that control step holds the previous qpos, zeros delta/history, continues the episode, marks it `solver_degraded`, and causes the completed batch to exit `1`.
+
+Every task log directory contains:
+
+- `run_manifest.yaml`: resolved config, roots, seed, workers, git state, dependencies, hardware, and sorted inputs;
+- `run_report.json`: totals and one structured result per input;
+- `failures.jsonl`: execution-error and solver-degraded records with messages and tracebacks.
+
+Process exit codes are stable:
+
+- `0`: program execution succeeded; scientifically invalid initializations may exist;
+- `1`: all possible samples finished, with an execution error or solver degradation;
+- `2`: configuration, input, assets, environment, or viewer preflight failed.
+
+With `skip=true`, a batch in which every expected output already exists is a successful no-op and still writes reports.
+
+## Full datasets and release benchmark
+
+For BODex/DGN evaluation, download `DGN_2k_processed.zip` from the [BODex dataset](https://huggingface.co/datasets/JiayiChenPKU/BODex) and arrange it as documented by that dataset. The maintained release gate uses three hands × five methods on one fixed sample plus 100 `ours` episodes per hand. Historical release classifications are:
+
+| Hand | Success | Failure | Invalid initialization |
+|---|---:|---:|---:|
+| Shadow | 75 | 4 | 21 |
+| Allegro | 80 | 6 | 14 |
+| LEAP Tac3D | 88 | 5 | 7 |
+
+After correcting the normal derivative at `fx=0` and rejecting infeasible SLSQP results, the promoted release baseline is:
+
+| Hand | Success | Failure | Invalid initialization | Solver degraded |
+|---|---:|---:|---:|---:|
+| Shadow | 68 | 5 | 21 | 6 |
+| Allegro | 80 | 5 | 14 | 1 |
+| LEAP Tac3D | 88 | 5 | 7 | 0 |
+
+All invalid-initialization classifications are unchanged. The seven degraded episodes previously consumed infeasible/nonconverged solutions; two additional borderline episodes changed scientific outcome under the corrected derivative (one Shadow success became failure, while one Allegro failure became success). A second 300-episode run reproduced every corrected trajectory and classification within the strict tolerances below.
+
+The three-hand × five-method fixed matrix uses a strict golden comparison: timing and additive diagnostic fields are ignored, while keys, shapes, stages, contact order, classifications, and floating trajectories must match (`rtol=1e-5`, `atol=1e-6`). The 300-episode historical suite is also audited against the table above, but intended differences from the corrected wrench-balance derivative and newly rejected infeasible solutions must be reviewed and then promoted to the corrected release baseline. Repeating the corrected suite must pass the same strict comparison.
+
+One single-process Shadow `ours` episode on the pinned environment gives the following implementation benchmark. These one-run values are a release sanity check, not a hardware-independent performance guarantee.
+
+| Metric | Pre-refactor | Refactored |
+|---|---:|---:|
+| Wall time | 5.41 s | 4.60 s |
+| Recorded solver time | 1.154 s | 1.175 s |
+| Peak RSS | 637 MiB | 483 MiB |
+
+## Static grasp visualization
+
+The visualizer accepts paths on the command line and can open a window or export a scene:
+
+```bash
+PYTHONPATH=src python script/quick_grasp_vis/vis_dexlearn_grasp.py \
+  --hand shadow --grasp examples/data/shadow/formatted/grasp.npy \
+  --object-root examples/assets/object/core_bottle_15787789482f045d8add95bf56d3d2fa \
+  --export /tmp/shadow_grasp.glb
+```
+
+## Extending the application
+
+- A new converter must validate its raw schema, write the common v1 grasp schema, and be registered in `CONVERTER_REGISTRY`.
+- A new controller implements or configures an episode policy and is registered in `METHOD_REGISTRY`; dynamic `eval(...)` dispatch is intentionally prohibited.
+- A new hand must define robot/MJCF metadata, qpos/joint-order tests, converter fixtures, headless integration coverage, and a release golden before it becomes public.
+
+## Development
+
+```bash
+PYTHONPATH=src MPLCONFIGDIR=/tmp/ada_grasp_ctrl_mpl python -m unittest discover -s tests -v
+python -m compileall -q src tests
+ruff check src tests script
+ruff format --check src tests script
+```
+
+CI runs Python 3.10 lint/format checks, unit/schema/CLI tests, and a precomputed Shadow headless smoke test. GPU full examples and release golden suites remain release gates.
+
+## License and acknowledgements
+
+Ada Grasp Ctrl source is licensed under the [MIT License](LICENSE), copyright 2026 Ada Grasp Ctrl Authors. Third-party submodules and example data retain their own licenses and attribution. The evaluation codebase builds upon [DexGraspBench](https://github.com/JYChen18/DexGraspBench); the example object comes from DGN/BODex as attributed above.
