@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,8 @@ import numpy as np
 
 
 IGNORED_KEYS = {"schema_version", "episode_status", "solver_diagnostics"}
+RTOL = 1e-5
+ATOL = 1e-6
 
 
 def _ignored(key: object) -> bool:
@@ -41,10 +44,14 @@ def compare_values(expected: Any, actual: Any, location: str, failures: list[str
             failures.append(f"{location}: expected mapping, got {type(actual).__name__}")
             return
         expected_keys = {key for key in expected if not _ignored(key)}
-        missing = expected_keys.difference(actual)
+        actual_keys = {key for key in actual if not _ignored(key)}
+        missing = expected_keys.difference(actual_keys)
         if missing:
-            failures.append(f"{location}: missing keys {sorted(missing)}")
-        for key in sorted(expected_keys.intersection(actual), key=str):
+            failures.append(f"{location}: missing keys {sorted(missing, key=str)}")
+        unexpected = actual_keys.difference(expected_keys)
+        if unexpected:
+            failures.append(f"{location}: unexpected keys {sorted(unexpected, key=str)}")
+        for key in sorted(expected_keys.intersection(actual_keys), key=str):
             compare_values(expected[key], actual[key], f"{location}.{key}", failures)
         return
     if isinstance(expected, (list, tuple)):
@@ -62,7 +69,7 @@ def compare_values(expected: Any, actual: Any, location: str, failures: list[str
             failures.append(f"{location}: shape {expected_array.shape} != {actual_array.shape}")
             return
         if np.issubdtype(expected_array.dtype, np.number) and np.issubdtype(actual_array.dtype, np.number):
-            if not np.allclose(expected_array, actual_array, rtol=1e-5, atol=1e-6, equal_nan=False):
+            if not np.allclose(expected_array, actual_array, rtol=RTOL, atol=ATOL, equal_nan=False):
                 difference = float(np.max(np.abs(expected_array - actual_array)))
                 failures.append(f"{location}: numeric mismatch (max_abs={difference})")
         elif not np.array_equal(expected_array, actual_array):
@@ -71,7 +78,7 @@ def compare_values(expected: Any, actual: Any, location: str, failures: list[str
     if isinstance(expected, (float, np.floating, int, np.integer)) and isinstance(
         actual, (float, np.floating, int, np.integer)
     ):
-        if not np.isclose(expected, actual, rtol=1e-5, atol=1e-6):
+        if not np.isclose(expected, actual, rtol=RTOL, atol=ATOL):
             failures.append(f"{location}: {expected!r} != {actual!r}")
         return
     if expected != actual:
@@ -86,13 +93,15 @@ def classify(record: dict[str, Any], lift_height: float = 0.2) -> str:
         lift_height: Target vertical lift in metres.
 
     Returns:
-        ``success``, ``failure``, ``invalid``, or ``solver_degraded``.
+        ``success``, ``failure``, ``invalid_initialization``,
+        ``solver_degraded``, or ``execution_error``.
     """
-    if record.get("episode_status") == "solver_degraded":
-        return "solver_degraded"
+    declared_status = record.get("episode_status")
+    if declared_status in {"execution_error", "invalid_initialization", "solver_degraded"}:
+        return declared_status
     poses = np.asarray(record.get("obj_pose", []))
     if poses.size == 0:
-        return "invalid"
+        return "invalid_initialization"
     target_z = poses[0, 2] + lift_height
     return "success" if abs(target_z - poses[-1, 2]) < lift_height / 2 else "failure"
 
@@ -137,7 +146,51 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("baseline", type=Path)
     parser.add_argument("current", type=Path)
+    parser.add_argument(
+        "--json-report",
+        type=Path,
+        help="Write the machine-readable comparison result to this path.",
+    )
     return parser.parse_args()
+
+
+def build_report(baseline_root: Path, current_root: Path, failures: list[str]) -> dict[str, Any]:
+    """Build a machine-readable summary for one directory comparison.
+
+    Args:
+        baseline_root: Root containing expected control files.
+        current_root: Root containing current control files.
+        failures: Mismatch descriptions produced by ``compare_directories``.
+
+    Returns:
+        JSON-serializable comparison report.
+    """
+    return {
+        "schema_version": 1,
+        "baseline_root": str(baseline_root),
+        "current_root": str(current_root),
+        "rtol": RTOL,
+        "atol": ATOL,
+        "expected_file_count": len(list(baseline_root.rglob("*.npy"))),
+        "actual_file_count": len(list(current_root.rglob("*.npy"))),
+        "passed": not failures,
+        "failure_count": len(failures),
+        "failures": failures,
+    }
+
+
+def write_json_report(path: Path, report: dict[str, Any]) -> None:
+    """Persist a comparison report using stable, human-readable JSON.
+
+    Args:
+        path: Destination JSON path.
+        report: JSON-serializable comparison report.
+
+    Returns:
+        None.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def main() -> None:
@@ -147,13 +200,18 @@ def main() -> None:
         None.
     """
     args = parse_args()
-    failures = compare_directories(args.baseline.resolve(), args.current.resolve())
+    baseline_root = args.baseline.resolve()
+    current_root = args.current.resolve()
+    failures = compare_directories(baseline_root, current_root)
+    report = build_report(baseline_root, current_root, failures)
+    if args.json_report is not None:
+        write_json_report(args.json_report.resolve(), report)
     if failures:
         print("Golden comparison failed:")
         for failure in failures:
             print(f"- {failure}")
         raise SystemExit(1)
-    count = len(list(args.baseline.rglob("*.npy")))
+    count = report["expected_file_count"]
     print(f"Golden comparison passed for {count} file(s).")
 
 
