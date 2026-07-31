@@ -155,7 +155,7 @@ For BODex/DGN evaluation, download `DGN_2k_processed.zip` from the [BODex datase
 | Allegro | 80 | 6 | 14 |
 | LEAP Tac3D | 88 | 5 | 7 |
 
-After correcting the normal derivative at `fx=0` and rejecting infeasible SLSQP results, the promoted release baseline is:
+After correcting the normal derivative at `fx=0` and rejecting infeasible SLSQP results, the intermediate corrected baseline was:
 
 | Hand | Success | Failure | Invalid initialization | Solver degraded |
 |---|---:|---:|---:|---:|
@@ -163,9 +163,21 @@ After correcting the normal derivative at `fx=0` and rejecting infeasible SLSQP 
 | Allegro | 80 | 5 | 14 | 1 |
 | LEAP Tac3D | 88 | 5 | 7 | 0 |
 
-All invalid-initialization classifications are unchanged. The seven degraded episodes previously consumed infeasible/nonconverged solutions; two additional borderline episodes changed scientific outcome under the corrected derivative (one Shadow success became failure, while one Allegro failure became success). A second 300-episode run reproduced every corrected trajectory and classification within the strict tolerances below.
+The current promoted baseline also sorts collision meshes before MuJoCo geom declaration, making trajectories independent of filesystem directory iteration order:
 
-The three-hand × five-method fixed matrix uses a strict golden comparison: timing and additive diagnostic fields are ignored, while keys, shapes, stages, contact order, classifications, and floating trajectories must match (`rtol=1e-5`, `atol=1e-6`). The 300-episode historical suite is also audited against the table above, but intended differences from the corrected wrench-balance derivative and newly rejected infeasible solutions must be reviewed and then promoted to the corrected release baseline. Repeating the corrected suite must pass the same strict comparison.
+| Hand | Success | Failure | Invalid initialization | Solver degraded | Execution error |
+|---|---:|---:|---:|---:|---:|
+| Shadow | 69 | 4 | 21 | 6 | 0 |
+| Allegro | 80 | 5 | 14 | 1 | 0 |
+| LEAP Tac3D | 88 | 5 | 7 | 0 | 0 |
+
+All invalid-initialization and solver-degraded classifications are unchanged. The seven degraded episodes previously consumed infeasible/nonconverged solutions; two borderline episodes changed scientific outcome under the corrected derivative (one Shadow success became failure, while one Allegro failure became success). Stable mesh declaration then changed one Shadow sample from failure to success. Two independent 300-episode runs reproduced every promoted trajectory and classification within the strict tolerances below.
+
+The three-hand × five-method fixed matrix uses a strict golden comparison: timing and approved additive metadata are ignored, while keys, shapes, stages, contact order, classifications, and floating trajectories must match (`rtol=1e-5`, `atol=1e-6`). The checked-in [golden evidence](release/golden/README.md) contains the 15 raw trajectories plus a machine-readable audit of both 15-case and 300-case repeat runs, input/output checksums, run manifests, and old-to-new differences. Verify the checked-in evidence with:
+
+```bash
+PYTHONPATH=src python script/audit_golden.py verify release/golden/artifact.json
+```
 
 One single-process Shadow `ours` episode on the pinned environment gives the following implementation benchmark. These one-run values are a release sanity check, not a hardware-independent performance guarantee.
 
