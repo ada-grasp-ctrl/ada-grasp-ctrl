@@ -61,11 +61,46 @@ def seed_everything(seed: int) -> None:
     Returns:
         None.
     """
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
+    normalized_seed = int(seed) % (2**32)
+    random.seed(normalized_seed)
+    np.random.seed(normalized_seed)
+    torch.manual_seed(normalized_seed)
     if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
+        torch.cuda.manual_seed_all(normalized_seed)
+
+
+def sample_seed(global_seed: int, sample_index: int) -> int:
+    """Derive one stable worker seed from a global seed and sorted index.
+
+    Args:
+        global_seed: User-configured run seed.
+        sample_index: Nonnegative index in the deterministically sorted input list.
+
+    Returns:
+        Unsigned 32-bit seed suitable for Python, NumPy, Torch, and CUDA.
+
+    Raises:
+        ValueError: If ``sample_index`` is negative.
+    """
+    if sample_index < 0:
+        raise ValueError("sample_index must be nonnegative")
+    sequence = np.random.SeedSequence([int(global_seed) % (2**32), int(sample_index)])
+    return int(sequence.generate_state(1, dtype=np.uint32)[0])
+
+
+def seed_sample(global_seed: int, sample_index: int) -> int:
+    """Reset every supported random generator for one worker sample.
+
+    Args:
+        global_seed: User-configured run seed.
+        sample_index: Nonnegative index in the deterministically sorted input list.
+
+    Returns:
+        Derived sample seed applied to all random generators.
+    """
+    derived_seed = sample_seed(global_seed, sample_index)
+    seed_everything(derived_seed)
+    return derived_seed
 
 
 def configure_runtime(config: DictConfig) -> DictConfig:

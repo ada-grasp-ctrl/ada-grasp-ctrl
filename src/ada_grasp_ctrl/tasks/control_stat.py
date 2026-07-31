@@ -20,7 +20,7 @@ from ada_grasp_ctrl.batch import (
     write_batch_report,
 )
 from ada_grasp_ctrl.errors import PreflightError
-from ada_grasp_ctrl.runtime import write_run_manifest
+from ada_grasp_ctrl.runtime import seed_sample, write_run_manifest
 from ada_grasp_ctrl.schema import load_npy_record, validate_control_record
 from ada_grasp_ctrl.utils.grasp_controller import GraspController
 from ada_grasp_ctrl.utils.robots.base import RobotFactory
@@ -41,16 +41,17 @@ def read_data(npy_path: str) -> dict[str, Any]:
     return validate_control_record(load_npy_record(npy_path), npy_path)
 
 
-def read_data_with_index(args: tuple[int, str]) -> tuple[int, str, dict[str, Any] | None, SampleResult | None]:
+def read_data_with_index(args: tuple[int, str, int]) -> tuple[int, str, dict[str, Any] | None, SampleResult | None]:
     """Read one result while retaining deterministic source order.
 
     Args:
-        args: Original index and input path.
+        args: Original index, input path, and global run seed.
 
     Returns:
         Index, path, optional data, and optional structured read error.
     """
-    index, npy_path = args
+    index, npy_path, global_seed = args
+    seed_sample(global_seed, index)
     try:
         return index, npy_path, read_data(npy_path), None
     except Exception as error:
@@ -330,7 +331,8 @@ def task_control_stat(configs: Any) -> None:
     indexed_data: list[tuple[int, str, dict[str, Any] | None, SampleResult | None]] = []
     if discovered:
         with multiprocessing.Pool(processes=configs.n_worker) as pool:
-            unordered = pool.imap_unordered(read_data_with_index, enumerate(discovered))
+            params = ((index, path, int(configs.seed)) for index, path in enumerate(discovered))
+            unordered = pool.imap_unordered(read_data_with_index, params)
             indexed_data = sorted(unordered, key=lambda value: value[0])
     statistics, results, output_path = get_control_results(indexed_data, configs)
     summary = write_batch_report(

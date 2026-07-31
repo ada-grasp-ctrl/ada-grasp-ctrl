@@ -23,7 +23,7 @@ from ada_grasp_ctrl.batch import (
 )
 from ada_grasp_ctrl.errors import PreflightError
 from ada_grasp_ctrl.paths import map_path, project_root
-from ada_grasp_ctrl.runtime import write_run_manifest
+from ada_grasp_ctrl.runtime import seed_sample, write_run_manifest
 from ada_grasp_ctrl.schema import (
     load_npy_record,
     validate_grasp_record,
@@ -318,21 +318,29 @@ def _expected_outputs(data_file: str, configs: Any) -> list[str]:
         return []
 
 
-def _convert_one(params: tuple[str, Any]) -> SampleResult:
+def _convert_one(params: tuple[str, Any, int]) -> SampleResult:
     """Run one converter and capture an exception as a structured result.
 
     Args:
-        params: Pair of raw path and composed configuration.
+        params: Raw path, composed configuration, and stable sample index.
 
     Returns:
         Completed or execution-error sample result.
     """
-    data_file, configs = params
+    data_file, configs, sample_index = params
+    derived_seed = seed_sample(int(configs.seed), sample_index)
     try:
         output_paths = CONVERTER_REGISTRY[configs.task.data_name]((data_file, configs))
-        return SampleResult(data_file, SampleStatus.COMPLETED, output_paths=output_paths)
+        return SampleResult(
+            data_file,
+            SampleStatus.COMPLETED,
+            output_paths=output_paths,
+            details={"sample_index": sample_index, "sample_seed": derived_seed},
+        )
     except Exception as error:
-        return execution_error(data_file, error)
+        result = execution_error(data_file, error)
+        result.details.update({"sample_index": sample_index, "sample_seed": derived_seed})
+        return result
 
 
 def task_format(configs: Any) -> None:
@@ -376,7 +384,8 @@ def task_format(configs: Any) -> None:
         len(selected),
     )
 
-    params = [(path, configs) for path in selected]
+    sample_indices = {path: index for index, path in enumerate(discovered)}
+    params = [(path, configs, sample_indices[path]) for path in selected]
     if params:
         with multiprocessing.Pool(processes=configs.n_worker) as pool:
             results = list(pool.imap_unordered(_convert_one, params))

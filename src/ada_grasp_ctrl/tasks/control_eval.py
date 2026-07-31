@@ -18,7 +18,7 @@ from ada_grasp_ctrl.batch import (
 )
 from ada_grasp_ctrl.errors import PreflightError
 from ada_grasp_ctrl.paths import resolve_from_root
-from ada_grasp_ctrl.runtime import write_run_manifest
+from ada_grasp_ctrl.runtime import seed_sample, write_run_manifest
 from ada_grasp_ctrl.schema import SchemaError, load_npy_record, validate_grasp_record
 from ada_grasp_ctrl.tasks.control_eval_func.base import control_output_path
 from ada_grasp_ctrl.tasks.control_eval_func.tabletop_dummy_arm_bs1 import tabletopDummyArmBS1Eval
@@ -71,16 +71,17 @@ def _expected_outputs(input_path: str, configs: Any) -> list[str]:
     ]
 
 
-def safe_eval_one(params: tuple[str, Any, object]) -> SampleResult:
+def safe_eval_one(params: tuple[str, Any, object, int]) -> SampleResult:
     """Evaluate one grasp and convert all outcomes into one structured result.
 
     Args:
-        params: Input path, composed configuration, and optional viewer session.
+        params: Input path, composed configuration, optional viewer session, and stable sample index.
 
     Returns:
         Completed, invalid-initialization, degraded, or execution-error result.
     """
-    input_npy_path, configs, debug_viewer_session = params
+    input_npy_path, configs, debug_viewer_session, sample_index = params
+    derived_seed = seed_sample(int(configs.seed), sample_index)
     try:
         evaluator_class = METHOD_REGISTRY[(configs.setting, configs.task.method)]
         output_paths, statuses = evaluator_class(
@@ -98,13 +99,19 @@ def safe_eval_one(params: tuple[str, Any, object]) -> SampleResult:
             input_npy_path,
             status,
             output_paths=output_paths,
-            details={"output_statuses": [value.value for value in statuses]},
+            details={
+                "sample_index": sample_index,
+                "sample_seed": derived_seed,
+                "output_statuses": [value.value for value in statuses],
+            },
         )
     except DebugViewerError:
         # Viewer startup is a task-level preflight failure, not a bad grasp.
         raise
     except Exception as error:
-        return execution_error(input_npy_path, error)
+        result = execution_error(input_npy_path, error)
+        result.details.update({"sample_index": sample_index, "sample_seed": derived_seed})
+        return result
 
 
 def _validate_control_preflight(configs: Any) -> None:
@@ -204,7 +211,8 @@ def task_control_eval(configs: Any) -> None:
     results = []
     try:
         debug_viewer_session = create_debug_viewer_session(configs.task)
-        params = [(path, configs, debug_viewer_session) for path in selected]
+        sample_indices = {path: index for index, path in enumerate(discovered)}
+        params = [(path, configs, debug_viewer_session, sample_indices[path]) for path in selected]
         if configs.task.debug_viewer or configs.task.debug_render:
             for index, item in enumerate(params):
                 logging.info("Control sample index: %d", index)

@@ -1,7 +1,9 @@
 """Unit tests for schemas, converters, paths, reports, and empty statistics."""
 
 import json
+import multiprocessing
 from pathlib import Path
+import random
 import subprocess
 import sys
 import tempfile
@@ -9,6 +11,7 @@ import unittest
 
 import numpy as np
 from omegaconf import OmegaConf
+import torch
 import yaml
 
 from ada_grasp_ctrl.batch import (
@@ -19,12 +22,26 @@ from ada_grasp_ctrl.batch import (
     write_batch_report,
 )
 from ada_grasp_ctrl.errors import BatchExecutionError
-from ada_grasp_ctrl.runtime import resolve_worker_count, seed_everything
+from ada_grasp_ctrl.runtime import resolve_worker_count, sample_seed, seed_everything, seed_sample
 from ada_grasp_ctrl.schema import SchemaError, load_npy_record, validate_grasp_record
 from ada_grasp_ctrl.tasks import TASK_REGISTRY
 from ada_grasp_ctrl.tasks.control_eval import METHOD_REGISTRY
 from ada_grasp_ctrl.tasks.control_stat import get_control_results
 from ada_grasp_ctrl.tasks.convert_format import Batched, Learning
+
+
+def _seeded_worker(params: tuple[int, int]) -> tuple[int, float, float, float]:
+    """Return random draws after applying one deterministic sample seed.
+
+    Args:
+        params: Global seed and stable sample index.
+
+    Returns:
+        Sample index followed by Python, NumPy, and Torch random draws.
+    """
+    global_seed, sample_index = params
+    seed_sample(global_seed, sample_index)
+    return sample_index, random.random(), float(np.random.rand()), float(torch.rand(1).item())
 
 
 class PipelineContractTest(unittest.TestCase):
@@ -280,6 +297,15 @@ class PipelineContractTest(unittest.TestCase):
         first = np.random.rand(4)
         seed_everything(42)
         np.testing.assert_array_equal(first, np.random.rand(4))
+
+        self.assertEqual(sample_seed(12, 3), sample_seed(12, 3))
+        self.assertNotEqual(sample_seed(12, 3), sample_seed(12, 4))
+        params = [(12, index) for index in range(8)]
+        with multiprocessing.Pool(processes=1) as pool:
+            serial = sorted(pool.imap_unordered(_seeded_worker, params))
+        with multiprocessing.Pool(processes=3) as pool:
+            parallel = sorted(pool.imap_unordered(_seeded_worker, reversed(params)))
+        self.assertEqual(serial, parallel)
 
     def test_cli_preserves_exit_codes_without_hydra_tracebacks(self):
         """Prove successful, batch-failure, and preflight exit semantics in subprocesses."""
