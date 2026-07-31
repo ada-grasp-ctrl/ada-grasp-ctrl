@@ -41,13 +41,36 @@ def np_normal_to_rot(axis_0, rot_base1=np.array([[0, 1, 0]]), rot_base2=np.array
 
 
 def np_get_delta_qpos(qpos1, qpos2):
-    # qpos: [x, y, z, qw, qx, qy, qz]
-    delta_pos = np.linalg.norm(qpos1[:3] - qpos2[:3])  # (1)
-    q1_inv = tq.qinverse(qpos1[3:])
-    q_rel = tq.qmult(qpos2[3:], q1_inv)
-    if np.abs(q_rel[0]) > 1:
-        q_rel[0] = 1
-    angle = 2 * np.arccos(q_rel[0])
+    """Compute translation distance and shortest orientation delta.
+
+    Args:
+        qpos1: First position plus WXYZ quaternion pose.
+        qpos2: Second position plus WXYZ quaternion pose.
+
+    Returns:
+        Translation distance and shortest rotation angle in degrees.
+
+    Raises:
+        ValueError: If either pose or quaternion is invalid.
+    """
+    pose1 = np.asarray(qpos1, dtype=float).reshape(-1)
+    pose2 = np.asarray(qpos2, dtype=float).reshape(-1)
+    if pose1.shape != (7,) or pose2.shape != (7,) or not np.all(np.isfinite([pose1, pose2])):
+        raise ValueError("Expected two finite seven-value poses.")
+    quaternion1 = pose1[3:]
+    quaternion2 = pose2[3:]
+    norm1 = np.linalg.norm(quaternion1)
+    norm2 = np.linalg.norm(quaternion2)
+    if norm1 <= 1e-12 or norm2 <= 1e-12:
+        raise ValueError("Expected nonzero pose quaternions.")
+
+    delta_pos = np.linalg.norm(pose1[:3] - pose2[:3])
+    q1_inv = tq.qinverse(quaternion1 / norm1)
+    q_rel = tq.qmult(quaternion2 / norm2, q1_inv)
+    # A quaternion and its negation encode the same rotation. Taking the
+    # absolute scalar part therefore selects the physically shortest angle.
+    cos_half_angle = np.clip(np.abs(q_rel[0]), 0.0, 1.0)
+    angle = 2 * np.arccos(cos_half_angle)
     angle_degrees = np.degrees(angle)
     return delta_pos, angle_degrees
 
@@ -154,8 +177,17 @@ def torch_quaternion_to_matrix(quaternions: torch.Tensor) -> torch.Tensor:
     """
 
     quaternions = torch.as_tensor(quaternions)
+    if quaternions.ndim == 0 or quaternions.shape[-1] != 4:
+        raise ValueError(f"Expected quaternions ending in dimension 4; got {quaternions.shape}.")
+    if not torch.is_floating_point(quaternions):
+        quaternions = quaternions.to(torch.get_default_dtype())
+    if not bool(torch.all(torch.isfinite(quaternions)).item()):
+        raise ValueError("Expected finite quaternions.")
+    norm_squared = (quaternions * quaternions).sum(-1)
+    if bool(torch.any(norm_squared <= 1e-12).item()):
+        raise ValueError("Expected nonzero quaternions.")
     r, i, j, k = torch.unbind(quaternions, -1)
-    two_s = 2.0 / (quaternions * quaternions).sum(-1)
+    two_s = 2.0 / norm_squared
 
     o = torch.stack(
         (
