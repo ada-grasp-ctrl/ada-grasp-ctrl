@@ -1,4 +1,4 @@
-xml_path: assets/hand/shadow/right_hand.xml 
+xml_path: ${asset_root}/hand/shadow/right_hand.xml
 mocap: True
 exclude_table_contact: 
 color: [0.863157, 0.0865002, 0.0802199, 1.0]

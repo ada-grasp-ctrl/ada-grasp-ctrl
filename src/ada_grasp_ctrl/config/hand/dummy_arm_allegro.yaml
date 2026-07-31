@@ -1,4 +1,4 @@
-xml_path: assets/hand/dummy_arm_allegro/right.xml 
+xml_path: ${asset_root}/hand/dummy_arm_allegro/right.xml
 mocap: False
 dummy_arm: True
 exclude_table_contact: 

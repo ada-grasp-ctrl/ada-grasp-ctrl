@@ -31,11 +31,11 @@ class Robot(ABC):
         if type == "mjcf":
             if self._mjcf_path is None:
                 raise NameError("MJCF file does not exist.")
-            return str(resolve_from_root(self._mjcf_path))
+            return str(resolve_from_root(self._mjcf_path, root_kind="asset"))
         elif type == "urdf":
             if self._urdf_path is None:
                 raise NameError("URDF file does not exist.")
-            return str(resolve_from_root(self._urdf_path))
+            return str(resolve_from_root(self._urdf_path, root_kind="asset"))
         else:
             raise ValueError(f"Unsupported type {type}.")
 
@@ -43,7 +43,7 @@ class Robot(ABC):
     def cfg_path(self):
         if self._cfg_path is None:
             raise NameError("cfg file does not exist.")
-        return str(resolve_from_root(self._cfg_path))
+        return str(resolve_from_root(self._cfg_path, root_kind="asset"))
 
     @property
     def base_pose(self):

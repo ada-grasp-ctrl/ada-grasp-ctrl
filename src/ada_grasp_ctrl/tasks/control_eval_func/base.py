@@ -62,7 +62,7 @@ class BaseEval:
             expected_joint_names=self.robot.dof_names,
             require_joint_names=True,
         )
-        self.grasp_data["obj_path"] = str(resolve_from_root(self.grasp_data["obj_path"]))
+        self.grasp_data["obj_path"] = str(resolve_from_root(self.grasp_data["obj_path"], root_kind="data"))
         validate_grasp_record(
             self.grasp_data,
             input_npy_path,

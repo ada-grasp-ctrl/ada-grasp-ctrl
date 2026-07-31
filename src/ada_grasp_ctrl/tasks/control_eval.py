@@ -18,7 +18,7 @@ from ada_grasp_ctrl.batch import (
 )
 from ada_grasp_ctrl.errors import PreflightError
 from ada_grasp_ctrl.paths import resolve_from_root
-from ada_grasp_ctrl.runtime import seed_sample, write_run_manifest
+from ada_grasp_ctrl.runtime import activate_runtime_roots, seed_sample, write_run_manifest
 from ada_grasp_ctrl.schema import SchemaError, load_npy_record, validate_grasp_record
 from ada_grasp_ctrl.tasks.control_eval_func.base import control_output_path
 from ada_grasp_ctrl.tasks.control_eval_func.tabletop_dummy_arm_bs1 import tabletopDummyArmBS1Eval
@@ -81,6 +81,7 @@ def safe_eval_one(params: tuple[str, Any, object, int]) -> SampleResult:
         Completed, invalid-initialization, degraded, or execution-error result.
     """
     input_npy_path, configs, debug_viewer_session, sample_index = params
+    activate_runtime_roots(configs)
     derived_seed = seed_sample(int(configs.seed), sample_index)
     try:
         evaluator_class = METHOD_REGISTRY[(configs.setting, configs.task.method)]
@@ -141,7 +142,7 @@ def _validate_control_preflight(configs: Any) -> None:
         raise PreflightError("task.offsets must contain at least one perturbation distance.")
 
 
-def _validate_object_assets(input_paths: list[str]) -> None:
+def _validate_object_assets(input_paths: list[str], configs: Any) -> None:
     """Validate assets referenced by structurally valid selected grasp records.
 
     Malformed or unreadable records remain sample-level execution errors so one
@@ -151,6 +152,7 @@ def _validate_object_assets(input_paths: list[str]) -> None:
 
     Args:
         input_paths: Deterministically selected grasp record paths.
+        configs: Runtime-normalized configuration containing the data root.
 
     Returns:
         None.
@@ -158,13 +160,14 @@ def _validate_object_assets(input_paths: list[str]) -> None:
     Raises:
         PreflightError: If a valid grasp references missing object resources.
     """
+    activate_runtime_roots(configs)
     for input_path in input_paths:
         try:
             record = validate_grasp_record(load_npy_record(input_path), input_path)
         except Exception:
             continue
         resolved_record = dict(record)
-        resolved_record["obj_path"] = str(resolve_from_root(resolved_record["obj_path"]))
+        resolved_record["obj_path"] = str(resolve_from_root(resolved_record["obj_path"], root_kind="data"))
         try:
             validate_grasp_record(resolved_record, input_path, require_assets=True)
         except SchemaError as error:
@@ -197,7 +200,7 @@ def task_control_eval(configs: Any) -> None:
         max_num=int(configs.task.max_num),
         seed=int(configs.seed),
     )
-    _validate_object_assets(selected)
+    _validate_object_assets(selected, configs)
     write_run_manifest(configs, discovered)
     logging.info(
         "Found %d grasp files in %s, skipped %d, processing %d.",

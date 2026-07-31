@@ -22,8 +22,8 @@ from ada_grasp_ctrl.batch import (
     write_batch_report,
 )
 from ada_grasp_ctrl.errors import PreflightError
-from ada_grasp_ctrl.paths import map_path, project_root
-from ada_grasp_ctrl.runtime import seed_sample, write_run_manifest
+from ada_grasp_ctrl.paths import map_path
+from ada_grasp_ctrl.runtime import activate_runtime_roots, seed_sample, write_run_manifest
 from ada_grasp_ctrl.schema import (
     SchemaError,
     load_npy_record,
@@ -54,12 +54,13 @@ def _path_scalar(value: object) -> str:
     return str(array.reshape(-1)[0])
 
 
-def _resolve_scene_path(raw_path: object, data_file: str) -> Path:
+def _resolve_scene_path(raw_path: object, data_file: str, configs: Any) -> Path:
     """Resolve scene paths emitted by DexLearn and BODex layouts.
 
     Args:
         raw_path: Stored path or one-element container.
         data_file: Raw record path used as a relative-path anchor.
+        configs: Runtime-normalized configuration containing the data root.
 
     Returns:
         Existing absolute scene path.
@@ -68,11 +69,17 @@ def _resolve_scene_path(raw_path: object, data_file: str) -> Path:
         SchemaError: If no supported relative or absolute candidate exists.
     """
     text = _path_scalar(raw_path)
-    candidates = [Path(text), Path(data_file).parent / text, project_root() / text]
+    # Direct converter calls in downstream libraries may predate runtime root
+    # normalization; the input directory remains a safe local fallback there.
+    data_root = Path(configs.get("data_root", Path(data_file).parent))
+    stored_path = Path(text).expanduser()
+    candidates = (
+        [stored_path] if stored_path.is_absolute() else [Path(data_file).parent / stored_path, data_root / stored_path]
+    )
     marker = "src/curobo/content/"
     if marker in text:
-        suffix = text.split(marker, maxsplit=1)[1]
-        candidates.extend([Path(suffix), project_root() / suffix])
+        suffix = Path(text.split(marker, maxsplit=1)[1])
+        candidates.extend([Path(data_file).parent / suffix, data_root / suffix])
     for candidate in candidates:
         expanded = candidate.expanduser()
         if expanded.is_file():
@@ -241,7 +248,7 @@ def BODex(params: tuple[str, Any]) -> list[str]:
         minimum_trajectory_steps=minimum_steps,
     )
     robot_pose = np.asarray(raw_data["robot_pose"])[0].copy()
-    scene_path = _resolve_scene_path(raw_data["scene_path"], data_file)
+    scene_path = _resolve_scene_path(raw_data["scene_path"], data_file, configs)
     scene_cfg = load_scene_cfg(scene_path)
     common = _object_fields(scene_cfg)
     common["scene_path"] = str(scene_path)
@@ -312,7 +319,7 @@ def Learning(params: tuple[str, Any]) -> list[str]:
         data_file,
         expected_qpos_dim=expected_qpos_dim,
     )
-    scene_path = _resolve_scene_path(raw_data["scene_path"], data_file)
+    scene_path = _resolve_scene_path(raw_data["scene_path"], data_file, configs)
     grasp = _object_fields(load_scene_cfg(scene_path))
     for field in ("grasp_qpos", "pregrasp_qpos", "squeeze_qpos"):
         grasp[field] = np.asarray(raw_data[field]).copy()
@@ -343,7 +350,7 @@ def Batched(params: tuple[str, Any]) -> list[str]:
         data_file,
         expected_qpos_dim=expected_qpos_dim,
     )
-    common = _object_fields(load_scene_cfg(_resolve_scene_path(raw_data["scene_path"], data_file)))
+    common = _object_fields(load_scene_cfg(_resolve_scene_path(raw_data["scene_path"], data_file, configs)))
     count = np.asarray(raw_data["grasp_qpos"]).shape[0]
     output_paths = _batched_output_paths(data_file, count, configs)
     saved = []
@@ -406,6 +413,7 @@ def _convert_one(params: tuple[str, Any, int]) -> SampleResult:
         Completed or execution-error sample result.
     """
     data_file, configs, sample_index = params
+    activate_runtime_roots(configs)
     derived_seed = seed_sample(int(configs.seed), sample_index)
     try:
         output_paths = CONVERTER_REGISTRY[configs.task.data_name]((data_file, configs))

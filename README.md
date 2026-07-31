@@ -33,7 +33,44 @@ git submodule sync --recursive
 git submodule update --init --recursive --progress
 ```
 
-`python src/main.py ...` remains a compatible wrapper around the installed `ada-grasp-ctrl` command. Paths are resolved from the repository root, so invocation does not depend on the shell's current directory.
+`python src/main.py ...` remains a compatible wrapper around the installed `ada-grasp-ctrl` command. Invocation does not depend on the shell's current directory. Runtime paths use this precedence: explicit Hydra/CLI value, environment variable, then a source-checkout default.
+
+The supported binary distribution is a code-only wheel with three explicit external roots:
+
+| Root | Environment variable | Purpose | Source-checkout default |
+|---|---|---|---|
+| `asset_root` | `ADA_GRASP_CTRL_ASSET_ROOT` | Hand MJCF, meshes, and robot files | `<checkout>/assets` |
+| `data_root` | `ADA_GRASP_CTRL_DATA_ROOT` | Raw inputs and relative object/scene paths stored in records | `<checkout>` |
+| `output_root` | `ADA_GRASP_CTRL_OUTPUT_ROOT` | Grasp, control, log, report, and statistics outputs | `<checkout>/output` |
+
+For example, a wheel can run outside the source tree with either CLI roots:
+
+```bash
+ada-grasp-ctrl task=control_eval hand=dummy_arm_shadow \
+  asset_root=/srv/ada-grasp/assets data_root=/srv/ada-grasp/data \
+  output_root=/srv/ada-grasp/output
+```
+
+or equivalent environment variables. Relative configured paths are anchored below the corresponding resolved root. `save_root` remains a compatibility alias for `output_root`; new automation should use `output_root`. An actual wheel task without the required external roots fails during preflight with exit code `2`; import and `--help` remain available.
+
+Pinocchio is intentionally installed as the conda-forge `pinocchio=3.0.0` package from `environment.yml`. PyPI does not publish the scientific baseline version under a compatible `pin==3.0.0`, so a pip-only runtime is not supported. `pytorch_kinematics` and `mr_utils` are installed from the recursively cloned, commit-pinned submodules:
+
+```text
+third_party/pytorch_kinematics @ 74de5a01bff2a3222b8174e6f8eb91db8756bfb3
+third_party/utils_python       @ 2d8dc1a5abf5899069f9ec73c13de73674f4c897
+```
+
+To verify wheel mode after creating the maintained conda environment, build wheels for the two source dependencies and this package, install them into the target environment, then configure external roots:
+
+```bash
+python -m pip wheel --no-deps --no-build-isolation \
+  third_party/pytorch_kinematics third_party/utils_python . -w /tmp/ada-grasp-wheels
+python -m pip install --no-deps --force-reinstall /tmp/ada-grasp-wheels/*.whl
+ADA_GRASP_CTRL_ASSET_ROOT="$PWD/assets" \
+ADA_GRASP_CTRL_DATA_ROOT="$PWD" \
+ADA_GRASP_CTRL_OUTPUT_ROOT=/tmp/ada-grasp-output \
+  ada-grasp-ctrl --help
+```
 
 ## 60-second quick start
 
@@ -133,7 +170,7 @@ A control record keeps the historical trajectories (`obj_pose`, `dof`, `doa`, `c
 
 Every task log directory contains:
 
-- `run_manifest.yaml`: resolved config, roots, seed, workers, git state, dependencies, hardware, and sorted inputs;
+- `run_manifest.yaml`: resolved config, final absolute roots, seed, workers, git state (or explicit unavailable values in wheel mode), dependencies including the Pinocchio module-version fallback, hardware, and sorted inputs;
 - `run_report.json`: totals and one structured result per input;
 - `failures.jsonl`: execution-error and solver-degraded records with messages and tracebacks.
 

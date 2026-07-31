@@ -4,12 +4,13 @@ n_worker: auto
 setting: tabletop
 
 exp_name: debug
-save_root: output
-asset_root: assets
-data_root: .
-save_dir: ${save_root}/${exp_name}_${hand_name}
+asset_root: null
+data_root: null
+output_root: null
+save_root: ${output_root}  # Compatibility alias; output_root is canonical.
+save_dir: ${output_root}/${exp_name}_${hand_name}
 grasp_dir: ${save_dir}/graspdata
-dummy_arm_grasp_dir: ${save_root}/${exp_name}_dummy_arm_${hand_name}/graspdata
+dummy_arm_grasp_dir: ${output_root}/${exp_name}_dummy_arm_${hand_name}/graspdata
 control_dir: ${save_dir}/control
 log_dir: ${save_dir}/log/${task_name}/${now:%Y_%m_%d_%H_%M_%S}
 
@@ -23,4 +24,9 @@ hand_name: ${hydra:runtime.choices.hand}
 
 hydra:
   run:
-    dir: ${log_dir}
+    # Runtime roots are resolved inside the application, after Hydra composes
+    # the config. Keep Hydra's own bookkeeping independent of the caller CWD.
+    dir: ${oc.env:TMPDIR,/tmp}/ada-grasp-ctrl-hydra/${now:%Y_%m_%d_%H_%M_%S_%f}
+  output_subdir: null
+  job:
+    chdir: false

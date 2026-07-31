@@ -19,6 +19,8 @@ dependencies = [
     "mujoco==3.6.0",
     "numpy==1.26.4",
     "omegaconf==2.3.0",
+    "mingrui_utils_python==0.1",
+    "pytorch_kinematics==0.7.5",
     "pytorch-seed==0.2.0",
     "PyYAML==6.0.3",
     "requests==2.33.1",
@@ -33,10 +35,8 @@ dependencies = [
 [project.scripts]
 ada-grasp-ctrl = "ada_grasp_ctrl.cli:main"
 
-# The repository is an application that is run from its source checkout.
-# Declaring no installable modules lets `pip install -e .` install and track
-# the dependency metadata without changing the existing `python src/main.py`
-# entry point or its relative Hydra config path.
+# The wheel contains Python code and Hydra configuration only. Hand MJCF,
+# object data, and generated outputs are external roots configured at runtime.
 [tool.setuptools]
 package-dir = {"" = "src"}
 include-package-data = true

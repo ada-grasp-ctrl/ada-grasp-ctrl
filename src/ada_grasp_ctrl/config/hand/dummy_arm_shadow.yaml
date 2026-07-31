@@ -1,4 +1,4 @@
-xml_path: assets/hand/dummy_arm_shadow/right_no_tendon.xml 
+xml_path: ${asset_root}/hand/dummy_arm_shadow/right_no_tendon.xml
 mocap: False
 dummy_arm: True
 exclude_table_contact: 
