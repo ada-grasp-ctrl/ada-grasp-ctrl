@@ -163,7 +163,7 @@ After correcting the normal derivative at `fx=0` and rejecting infeasible SLSQP 
 | Allegro | 80 | 5 | 14 | 1 |
 | LEAP Tac3D | 88 | 5 | 7 | 0 |
 
-The current promoted baseline also sorts collision meshes before MuJoCo geom declaration, making trajectories independent of filesystem directory iteration order:
+The current promoted baseline also sorts collision meshes before MuJoCo geom declaration and uses diagnosed direct linear solves instead of `inv(A) @ B`, making trajectories independent of filesystem directory iteration order while avoiding explicit matrix inversion:
 
 | Hand | Success | Failure | Invalid initialization | Solver degraded | Execution error |
 |---|---:|---:|---:|---:|---:|
@@ -171,7 +171,7 @@ The current promoted baseline also sorts collision meshes before MuJoCo geom dec
 | Allegro | 80 | 5 | 14 | 1 | 0 |
 | LEAP Tac3D | 88 | 5 | 7 | 0 | 0 |
 
-All invalid-initialization and solver-degraded classifications are unchanged. The seven degraded episodes previously consumed infeasible/nonconverged solutions; two borderline episodes changed scientific outcome under the corrected derivative (one Shadow success became failure, while one Allegro failure became success). Stable mesh declaration then changed one Shadow sample from failure to success. Two independent 300-episode runs reproduced every promoted trajectory and classification within the strict tolerances below.
+All invalid-initialization and solver-degraded classifications are unchanged. The seven degraded episodes previously consumed infeasible/nonconverged solutions; two borderline episodes changed scientific outcome under the corrected derivative (one Shadow success became failure, while one Allegro failure became success). Stable mesh declaration then changed one Shadow sample from failure to success. Direct solve changed 248/300 closed-loop trajectories because last-bit linear-algebra differences are amplified by contact dynamics, but changed no classifications. Two independent 300-episode runs reproduced every promoted trajectory and classification within the strict tolerances below.
 
 The three-hand × five-method fixed matrix uses a strict golden comparison: timing and approved additive metadata are ignored, while keys, shapes, stages, contact order, classifications, and floating trajectories must match (`rtol=1e-5`, `atol=1e-6`). The checked-in [golden evidence](release/golden/README.md) contains the 15 raw trajectories plus a machine-readable audit of both 15-case and 300-case repeat runs, input/output checksums, run manifests, and old-to-new differences. Verify the checked-in evidence with:
 
@@ -186,6 +186,8 @@ One single-process Shadow `ours` episode on the pinned environment gives the fol
 | Wall time | 5.41 s | 4.60 s |
 | Recorded solver time | 1.154 s | 1.175 s |
 | Peak RSS | 637 MiB | 483 MiB |
+
+The incremental phase-4 direct-solve benchmark compared the immediately preceding optimization refactor with the final implementation on the same fixed Shadow episode: wall time changed from 5.71 s to 5.60 s, peak RSS from 483,972 KiB to 482,808 KiB, and aggregate fixed-matrix optimization time from 6.712 s to 6.804 s (+1.37%).
 
 ## Static grasp visualization
 
