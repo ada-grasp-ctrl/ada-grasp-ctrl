@@ -166,7 +166,13 @@ def compute_dummy_arm_qpos(params, device, robot, kin):
 
     # concatenate grasps together for batched IK
     for path in input_npy_path_list:
-        graspdata = validate_grasp_record(load_npy_record(path), path)
+        graspdata = validate_grasp_record(
+            load_npy_record(path),
+            path,
+            expected_joint_dim=7 + robot.hand.n_dof,
+            expected_joint_names=robot.hand.dof_names,
+            qpos_prefix_dim=7,
+        )
         graspdata_list.append(graspdata)
         pregrasp_qpos.append(graspdata["pregrasp_qpos"])
         grasp_qpos.append(graspdata["grasp_qpos"])
@@ -234,16 +240,24 @@ def compute_dummy_arm_qpos(params, device, robot, kin):
         path = input_npy_path_list[i]
         graspdata = graspdata_list[i]  # keep the other saved info
         if "joint_names" in graspdata.keys():
-            graspdata["joint_names"] = robot.arm.dof_names + graspdata["joint_names"]
+            graspdata["joint_names"] = robot.arm.dof_names + list(graspdata["joint_names"])
         else:
-            graspdata["joint_names"] = robot.dof_names  # need check
+            graspdata["joint_names"] = robot.dof_names
         graspdata["pregrasp_qpos"] = pregrasp_qpos_array[i, :]
         graspdata["grasp_qpos"] = grasp_qpos_array[i, :]
         graspdata["squeeze_qpos"] = squeeze_qpos_array[i, :]
         graspdata["approach_qpos"] = pregrasp_qpos_array[i, :].reshape(1, -1)
         output_path = map_path(path, configs.grasp_dir, configs.dummy_arm_grasp_dir)
+        current = with_current_schema(graspdata)
+        validate_grasp_record(
+            current,
+            output_path,
+            expected_joint_dim=robot.n_dof,
+            expected_joint_names=robot.dof_names,
+            require_joint_names=True,
+        )
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        np.save(output_path, with_current_schema(graspdata))
+        np.save(output_path, current)
         output_paths.append(str(output_path.resolve(strict=False)))
     return output_paths
 

@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 import numpy as np
 
@@ -167,6 +168,46 @@ def _validate_pose(record: Mapping[str, Any], field: str, sample: str | Path) ->
     return pose
 
 
+def _validate_joint_names(
+    value: object,
+    field: str,
+    sample: str | Path,
+    *,
+    expected_length: int,
+    expected_names: Sequence[str] | None = None,
+) -> list[str]:
+    """Validate a unique one-dimensional joint-name sequence.
+
+    Args:
+        value: Candidate joint-name container.
+        field: Contextual field path.
+        sample: Source used in validation errors.
+        expected_length: Exact number of joint names.
+        expected_names: Optional exact ordered names.
+
+    Returns:
+        Joint names as a plain list.
+
+    Raises:
+        SchemaError: If type, length, uniqueness, or order is invalid.
+    """
+    if isinstance(value, (str, bytes)) or not isinstance(value, (list, tuple, np.ndarray)):
+        raise SchemaError(sample, field, "a one-dimensional string sequence", type(value).__name__)
+    array = np.asarray(value, dtype=object)
+    if array.ndim != 1:
+        raise SchemaError(sample, field, "a one-dimensional string sequence", array.shape)
+    names = array.tolist()
+    if len(names) != expected_length:
+        raise SchemaError(sample, field, f"length {expected_length}", len(names))
+    if any(not isinstance(name, str) or not name for name in names):
+        raise SchemaError(sample, field, "nonempty strings", names)
+    if len(set(names)) != len(names):
+        raise SchemaError(sample, field, "unique names", names)
+    if expected_names is not None and names != list(expected_names):
+        raise SchemaError(sample, field, "the configured joint order", names)
+    return names
+
+
 def validate_scene_record(record: Mapping[str, Any], sample: str | Path) -> dict[str, Any]:
     """Validate the scene fields consumed by all converters.
 
@@ -188,21 +229,38 @@ def validate_scene_record(record: Mapping[str, Any], sample: str | Path) -> dict
         raise SchemaError(sample, f"scene.{object_name}", "an object mapping", "missing")
     object_record = scene[object_name]
     for field in ("file_path", "pose", "scale"):
-        _require(object_record, field, sample)
-    _validate_pose(object_record, "pose", sample)
+        if field not in object_record:
+            raise SchemaError(sample, f"scene.{object_name}.{field}", "a required field", "missing")
+    file_field = f"scene.{object_name}.file_path"
+    file_path = object_record["file_path"]
+    if not isinstance(file_path, (str, Path)):
+        raise SchemaError(sample, file_field, "a filesystem path", type(file_path).__name__)
+    if not Path(file_path).is_file():
+        raise SchemaError(sample, file_field, "an existing object mesh file", str(file_path))
+    pose_field = f"scene.{object_name}.pose"
+    _validate_pose({pose_field: object_record["pose"]}, pose_field, sample)
     scale = np.asarray(object_record["scale"])
     if scale.size == 0 or not np.all(np.isfinite(scale)) or np.any(scale <= 0):
         raise SchemaError(sample, f"scene.{object_name}.scale", "positive finite values", scale)
     return dict(record)
 
 
-def validate_raw_record(record: Mapping[str, Any], converter: str, sample: str | Path) -> dict[str, Any]:
+def validate_raw_record(
+    record: Mapping[str, Any],
+    converter: str,
+    sample: str | Path,
+    *,
+    expected_qpos_dim: int | None = None,
+    minimum_trajectory_steps: int = 3,
+) -> dict[str, Any]:
     """Validate fields specific to one supported raw converter.
 
     Args:
         record: Loaded raw record.
         converter: ``BODex``, ``Learning``, or ``Batched``.
         sample: Input path used in validation errors.
+        expected_qpos_dim: Optional exact final qpos/robot-pose dimension.
+        minimum_trajectory_steps: Minimum BODex approach/control trajectory length.
 
     Returns:
         Mutable validated raw record.
@@ -213,29 +271,45 @@ def validate_raw_record(record: Mapping[str, Any], converter: str, sample: str |
     schema_version(record, sample)
     _require(record, "scene_path", sample)
     if converter == "BODex":
-        robot_pose = _finite_array(record, "robot_pose", sample)
-        if robot_pose.ndim < 3 or robot_pose.shape[-1] < 7:
-            raise SchemaError(sample, "robot_pose", "a pose trajectory ending in at least 7 values", robot_pose.shape)
-        joint_names = _require(record, "joint_names", sample)
-        if not isinstance(joint_names, (list, tuple, np.ndarray)):
-            raise SchemaError(sample, "joint_names", "a sequence", type(joint_names).__name__)
+        robot_pose = _finite_array(record, "robot_pose", sample, ndim=4)
+        if robot_pose.shape[0] != 1:
+            raise SchemaError(sample, "robot_pose", "shape (1, N, T, D)", robot_pose.shape)
+        if robot_pose.shape[2] < minimum_trajectory_steps:
+            raise SchemaError(
+                sample,
+                "robot_pose",
+                f"at least {minimum_trajectory_steps} trajectory steps",
+                robot_pose.shape,
+            )
+        if expected_qpos_dim is not None and robot_pose.shape[-1] != expected_qpos_dim:
+            raise SchemaError(sample, "robot_pose", f"final dimension {expected_qpos_dim}", robot_pose.shape)
+        if robot_pose.shape[-1] < 8:
+            raise SchemaError(sample, "robot_pose", "a pose plus at least one joint", robot_pose.shape)
+        _validate_joint_names(
+            _require(record, "joint_names", sample),
+            "joint_names",
+            sample,
+            expected_length=robot_pose.shape[-1] - 7,
+        )
     elif converter in {"Learning", "Batched"}:
+        expected_ndim = 1 if converter == "Learning" else 2
         arrays = {
-            field: _finite_array(record, field, sample) for field in ("pregrasp_qpos", "grasp_qpos", "squeeze_qpos")
+            field: _finite_array(record, field, sample, ndim=expected_ndim)
+            for field in ("pregrasp_qpos", "grasp_qpos", "squeeze_qpos")
         }
         if any(array.shape != arrays["grasp_qpos"].shape for array in arrays.values()):
             raise SchemaError(sample, "*_qpos", "identical shapes", {k: v.shape for k, v in arrays.items()})
-        if arrays["grasp_qpos"].shape[-1] < 7:
-            raise SchemaError(sample, "grasp_qpos", "a final dimension of at least 7", arrays["grasp_qpos"].shape)
+        if expected_qpos_dim is not None and arrays["grasp_qpos"].shape[-1] != expected_qpos_dim:
+            raise SchemaError(sample, "grasp_qpos", f"final dimension {expected_qpos_dim}", arrays["grasp_qpos"].shape)
+        if arrays["grasp_qpos"].shape[-1] < 8:
+            raise SchemaError(sample, "grasp_qpos", "a pose plus at least one joint", arrays["grasp_qpos"].shape)
         for field, array in arrays.items():
             quaternion_norm = np.linalg.norm(array[..., 3:7], axis=-1)
             if np.any(quaternion_norm <= 1e-12):
                 raise SchemaError(sample, field, "nonzero WXYZ quaternions", array.shape)
         if converter == "Batched":
-            scene_scale = _finite_array(record, "scene_scale", sample)
-            if arrays["grasp_qpos"].ndim != 2:
-                raise SchemaError(sample, "grasp_qpos", "a two-dimensional batch", arrays["grasp_qpos"].shape)
-            if scene_scale.reshape(-1).shape[0] != arrays["grasp_qpos"].shape[0]:
+            scene_scale = _finite_array(record, "scene_scale", sample, ndim=1)
+            if scene_scale.shape[0] != arrays["grasp_qpos"].shape[0]:
                 raise SchemaError(
                     sample,
                     "scene_scale",
@@ -252,6 +326,9 @@ def validate_grasp_record(
     sample: str | Path,
     *,
     expected_joint_dim: int | None = None,
+    expected_joint_names: Sequence[str] | None = None,
+    qpos_prefix_dim: int = 0,
+    require_joint_names: bool = False,
     require_assets: bool = False,
 ) -> dict[str, Any]:
     """Validate a legacy-v0 or current-v1 grasp record.
@@ -260,6 +337,9 @@ def validate_grasp_record(
         record: Loaded grasp mapping.
         sample: Input path used in validation errors.
         expected_joint_dim: Optional exact qpos length.
+        expected_joint_names: Optional exact ordered joint-name sequence.
+        qpos_prefix_dim: Leading non-joint qpos values, such as a seven-value free pose.
+        require_joint_names: Whether the record must declare joint names.
         require_assets: Whether the object directory and metadata must exist.
 
     Returns:
@@ -282,8 +362,26 @@ def validate_grasp_record(
         raise SchemaError(sample, "*_qpos", "equal one-dimensional lengths", dimensions)
     if expected_joint_dim is not None and dimensions["grasp_qpos"] != expected_joint_dim:
         raise SchemaError(sample, "grasp_qpos", f"length {expected_joint_dim}", dimensions["grasp_qpos"])
-    if "joint_names" in record and len(record["joint_names"]) != dimensions["grasp_qpos"]:
-        raise SchemaError(sample, "joint_names", f"length {dimensions['grasp_qpos']}", len(record["joint_names"]))
+    if qpos_prefix_dim < 0 or qpos_prefix_dim > dimensions["grasp_qpos"]:
+        raise SchemaError(sample, "qpos_prefix_dim", f"between 0 and {dimensions['grasp_qpos']}", qpos_prefix_dim)
+    expected_name_count = dimensions["grasp_qpos"] - qpos_prefix_dim
+    if expected_joint_names is not None and len(expected_joint_names) != expected_name_count:
+        raise SchemaError(
+            sample,
+            "joint_names",
+            f"{expected_name_count} configured names",
+            len(expected_joint_names),
+        )
+    if "joint_names" in record:
+        _validate_joint_names(
+            record["joint_names"],
+            "joint_names",
+            sample,
+            expected_length=expected_name_count,
+            expected_names=expected_joint_names,
+        )
+    elif require_joint_names:
+        raise SchemaError(sample, "joint_names", "a required field", "missing")
 
     if require_assets:
         asset_path = Path(object_path)
@@ -292,6 +390,25 @@ def validate_grasp_record(
         metadata_path = asset_path / "info" / "simplified.json"
         if not metadata_path.is_file():
             raise SchemaError(sample, "obj_path", f"metadata at {metadata_path}", "missing")
+        try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise SchemaError(sample, "obj_path.info.simplified.json", "valid JSON metadata", str(error)) from error
+        if not isinstance(metadata, Mapping):
+            raise SchemaError(sample, "obj_path.info.simplified.json", "a mapping", type(metadata).__name__)
+        for field in ("mass", "density", "scale"):
+            value = np.asarray(metadata.get(field))
+            if value.size != 1 or not np.issubdtype(value.dtype, np.number) or not np.all(np.isfinite(value)):
+                raise SchemaError(
+                    sample, f"obj_path.info.simplified.json.{field}", "one finite number", metadata.get(field)
+                )
+            if float(value.reshape(-1)[0]) <= 0:
+                raise SchemaError(
+                    sample,
+                    f"obj_path.info.simplified.json.{field}",
+                    "a positive finite number",
+                    metadata.get(field),
+                )
         collision_directory = asset_path / "urdf" / "meshes"
         if not collision_directory.is_dir():
             raise SchemaError(
@@ -300,7 +417,7 @@ def validate_grasp_record(
                 f"a collision mesh directory at {collision_directory}",
                 "missing",
             )
-        collision_meshes = sorted(collision_directory.glob("convex_piece_*.obj"))
+        collision_meshes = sorted(path for path in collision_directory.glob("convex_piece_*.obj") if path.is_file())
         if not collision_meshes:
             raise SchemaError(
                 sample,
@@ -324,12 +441,48 @@ def validate_control_record(record: Mapping[str, Any], sample: str | Path) -> di
     schema_version(record, sample)
     object_poses = _require(record, "obj_pose", sample)
     if len(object_poses):
-        poses = np.asarray(object_poses)
-        if poses.ndim != 2 or poses.shape[1] != 7 or not np.all(np.isfinite(poses)):
+        poses = _validate_pose(record, "obj_pose", sample)
+        if poses.ndim != 2:
             raise SchemaError(sample, "obj_pose", "a finite (T, 7) trajectory or an empty sequence", poses.shape)
     contacts = _require(record, "contacts", sample)
     if not isinstance(contacts, (list, tuple, np.ndarray)):
         raise SchemaError(sample, "contacts", "a sequence", type(contacts).__name__)
+    contact_count = len(contacts)
+    for field in ("dof", "doa", "planned_dof"):
+        if field not in record:
+            continue
+        trajectory = np.asarray(record[field])
+        if len(trajectory) != contact_count:
+            raise SchemaError(sample, field, f"{contact_count} steps aligned with contacts", len(trajectory))
+        if len(trajectory) and (trajectory.ndim != 2 or not np.issubdtype(trajectory.dtype, np.number)):
+            raise SchemaError(sample, field, "a finite two-dimensional trajectory", trajectory.shape)
+        if len(trajectory) and not np.all(np.isfinite(trajectory)):
+            raise SchemaError(sample, field, "only finite values", "contains NaN or infinity")
+
+    for step_index, step_contacts in enumerate(contacts):
+        step_field = f"contacts[{step_index}]"
+        if isinstance(step_contacts, (str, bytes)) or not isinstance(step_contacts, (list, tuple, np.ndarray)):
+            raise SchemaError(sample, step_field, "a contact sequence", type(step_contacts).__name__)
+        for contact_index, contact in enumerate(step_contacts):
+            contact_field = f"{step_field}[{contact_index}]"
+            if not isinstance(contact, Mapping):
+                raise SchemaError(sample, contact_field, "a contact mapping", type(contact).__name__)
+            for field, shape in (("contact_pos", (3,)), ("contact_force", (6,)), ("contact_frame", (3, 3))):
+                field_path = f"{contact_field}.{field}"
+                array = _finite_array({field_path: contact.get(field)}, field_path, sample)
+                if array.shape != shape:
+                    raise SchemaError(sample, field_path, f"shape {shape}", array.shape)
+            frame = np.asarray(contact["contact_frame"])
+            if not np.allclose(frame.T @ frame, np.eye(3), rtol=1e-5, atol=1e-6):
+                raise SchemaError(sample, f"{contact_field}.contact_frame", "an orthonormal frame", frame)
+            determinant = float(np.linalg.det(frame))
+            if not np.isclose(determinant, 1.0, rtol=1e-5, atol=1e-6):
+                raise SchemaError(
+                    sample,
+                    f"{contact_field}.contact_frame",
+                    "a right-handed frame with determinant +1",
+                    determinant,
+                )
     status = record.get("episode_status")
     supported = {"completed", "invalid_initialization", "solver_degraded", "execution_error", None}
     if status not in supported:

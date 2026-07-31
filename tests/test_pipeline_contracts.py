@@ -72,6 +72,8 @@ class PipelineContractTest(unittest.TestCase):
         """
         scene_path = self.root / "scene.npy"
         object_mesh = self.root / "object" / "meshes" / "object.obj"
+        object_mesh.parent.mkdir(parents=True)
+        object_mesh.write_text("o object\n", encoding="utf-8")
         scene = {
             "task": {"obj_name": "target"},
             "scene": {
@@ -123,7 +125,9 @@ class PipelineContractTest(unittest.TestCase):
         scene_path = self._scene_path()
         raw_root = self.root / "raw"
         raw_root.mkdir()
-        qpos = np.array([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.2])
+        qpos = np.zeros(29)
+        qpos[3] = 1.0
+        qpos[7:] = 0.2
         learning_path = raw_root / "learning.npy"
         np.save(
             learning_path,

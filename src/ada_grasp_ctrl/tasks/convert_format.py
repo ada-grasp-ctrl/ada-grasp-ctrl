@@ -25,6 +25,7 @@ from ada_grasp_ctrl.errors import PreflightError
 from ada_grasp_ctrl.paths import map_path, project_root
 from ada_grasp_ctrl.runtime import seed_sample, write_run_manifest
 from ada_grasp_ctrl.schema import (
+    SchemaError,
     load_npy_record,
     validate_grasp_record,
     validate_raw_record,
@@ -32,6 +33,7 @@ from ada_grasp_ctrl.schema import (
     with_current_schema,
 )
 from ada_grasp_ctrl.utils.rot_util import torch_matrix_to_quaternion, torch_quaternion_to_matrix
+from ada_grasp_ctrl.utils.robots.base import RobotFactory
 
 
 Converter = Callable[[str, Any], list[str]]
@@ -60,7 +62,10 @@ def _resolve_scene_path(raw_path: object, data_file: str) -> Path:
         data_file: Raw record path used as a relative-path anchor.
 
     Returns:
-        Existing absolute scene path, or the most direct candidate for diagnostics.
+        Existing absolute scene path.
+
+    Raises:
+        SchemaError: If no supported relative or absolute candidate exists.
     """
     text = _path_scalar(raw_path)
     candidates = [Path(text), Path(data_file).parent / text, project_root() / text]
@@ -72,7 +77,21 @@ def _resolve_scene_path(raw_path: object, data_file: str) -> Path:
         expanded = candidate.expanduser()
         if expanded.is_file():
             return expanded.resolve()
-    return candidates[-1].expanduser().resolve(strict=False)
+    raise SchemaError(data_file, "scene_path", "an existing scene .npy file", text)
+
+
+def _hand_qpos_contract(configs: Any) -> tuple[int, list[str]]:
+    """Return the pose-plus-hand qpos dimension and exact hand joint order.
+
+    Args:
+        configs: Composed application configuration.
+
+    Returns:
+        Total pose-plus-hand dimension and ordered hand joint names.
+    """
+    robot_prefix = "" if configs.hand_name == "allegro" else "rh_"
+    robot = RobotFactory.create_robot(robot_type=configs.hand_name, prefix=robot_prefix)
+    return 7 + robot.n_dof, list(robot.dof_names)
 
 
 def load_scene_cfg(scene_path: str | Path) -> dict[str, Any]:
@@ -171,18 +190,32 @@ def _batched_output_paths(data_file: str, count: int, configs: Any) -> list[Path
     return [directory / f"{index}.npy" for index in range(count)]
 
 
-def _save_grasp(path: Path, record: Mapping[str, Any]) -> str:
+def _save_grasp(
+    path: Path,
+    record: Mapping[str, Any],
+    *,
+    expected_qpos_dim: int,
+    expected_joint_names: list[str],
+) -> str:
     """Validate and save one version-one grasp record.
 
     Args:
         path: Destination ``.npy`` path.
         record: Grasp fields to serialize.
+        expected_qpos_dim: Exact pose-plus-hand qpos dimension.
+        expected_joint_names: Exact hand joint order when names are present.
 
     Returns:
         Absolute output path string.
     """
     current = with_current_schema(record)
-    validate_grasp_record(current, path)
+    validate_grasp_record(
+        current,
+        path,
+        expected_joint_dim=expected_qpos_dim,
+        expected_joint_names=expected_joint_names,
+        qpos_prefix_dim=7,
+    )
     path.parent.mkdir(parents=True, exist_ok=True)
     np.save(path, current)
     return str(path.resolve(strict=False))
@@ -198,7 +231,15 @@ def BODex(params: tuple[str, Any]) -> list[str]:
         Paths of all per-grasp outputs.
     """
     data_file, configs = params
-    raw_data = validate_raw_record(load_npy_record(data_file), "BODex", data_file)
+    expected_qpos_dim, expected_joint_names = _hand_qpos_contract(configs)
+    minimum_steps = 3 if configs.hand.mocap else 4
+    raw_data = validate_raw_record(
+        load_npy_record(data_file),
+        "BODex",
+        data_file,
+        expected_qpos_dim=expected_qpos_dim,
+        minimum_trajectory_steps=minimum_steps,
+    )
     robot_pose = np.asarray(raw_data["robot_pose"])[0].copy()
     scene_path = _resolve_scene_path(raw_data["scene_path"], data_file)
     scene_cfg = load_scene_cfg(scene_path)
@@ -239,7 +280,14 @@ def BODex(params: tuple[str, Any]) -> list[str]:
                 squeeze_qpos=robot_pose[index, -2],
                 lift_qpos=robot_pose[index, -1],
             )
-        saved.append(_save_grasp(output_path, grasp))
+        saved.append(
+            _save_grasp(
+                output_path,
+                grasp,
+                expected_qpos_dim=expected_qpos_dim,
+                expected_joint_names=expected_joint_names,
+            )
+        )
     return saved
 
 
@@ -253,12 +301,25 @@ def Learning(params: tuple[str, Any]) -> list[str]:
         A one-element output path list.
     """
     data_file, configs = params
-    raw_data = validate_raw_record(load_npy_record(data_file), "Learning", data_file)
+    expected_qpos_dim, expected_joint_names = _hand_qpos_contract(configs)
+    raw_data = validate_raw_record(
+        load_npy_record(data_file),
+        "Learning",
+        data_file,
+        expected_qpos_dim=expected_qpos_dim,
+    )
     scene_path = _resolve_scene_path(raw_data["scene_path"], data_file)
     grasp = _object_fields(load_scene_cfg(scene_path))
     for field in ("grasp_qpos", "pregrasp_qpos", "squeeze_qpos"):
         grasp[field] = np.asarray(raw_data[field]).copy()
-    return [_save_grasp(_mapped_output(data_file, configs), grasp)]
+    return [
+        _save_grasp(
+            _mapped_output(data_file, configs),
+            grasp,
+            expected_qpos_dim=expected_qpos_dim,
+            expected_joint_names=expected_joint_names,
+        )
+    ]
 
 
 def Batched(params: tuple[str, Any]) -> list[str]:
@@ -271,7 +332,13 @@ def Batched(params: tuple[str, Any]) -> list[str]:
         Sibling output paths for every batch element.
     """
     data_file, configs = params
-    raw_data = validate_raw_record(load_npy_record(data_file), "Batched", data_file)
+    expected_qpos_dim, expected_joint_names = _hand_qpos_contract(configs)
+    raw_data = validate_raw_record(
+        load_npy_record(data_file),
+        "Batched",
+        data_file,
+        expected_qpos_dim=expected_qpos_dim,
+    )
     common = _object_fields(load_scene_cfg(_resolve_scene_path(raw_data["scene_path"], data_file)))
     count = np.asarray(raw_data["grasp_qpos"]).shape[0]
     output_paths = _batched_output_paths(data_file, count, configs)
@@ -281,7 +348,14 @@ def Batched(params: tuple[str, Any]) -> list[str]:
         grasp["obj_scale"] = common["obj_scale"] * float(np.asarray(raw_data["scene_scale"]).reshape(-1)[index])
         for field in ("grasp_qpos", "pregrasp_qpos", "squeeze_qpos"):
             grasp[field] = np.asarray(raw_data[field])[index].copy()
-        saved.append(_save_grasp(output_path, grasp))
+        saved.append(
+            _save_grasp(
+                output_path,
+                grasp,
+                expected_qpos_dim=expected_qpos_dim,
+                expected_joint_names=expected_joint_names,
+            )
+        )
     return saved
 
 

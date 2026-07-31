@@ -52,9 +52,25 @@ class BaseEval:
         """
         self.input_npy_path = input_npy_path
         self.configs = configs
-        self.grasp_data = validate_grasp_record(load_npy_record(input_npy_path), input_npy_path)
+        robot_name = self.configs.hand_name
+        robot_prefix = "rh_" if "allegro" not in robot_name else ""
+        self.robot = RobotFactory.create_robot(robot_type=robot_name, prefix=robot_prefix)
+        self.grasp_data = validate_grasp_record(
+            load_npy_record(input_npy_path),
+            input_npy_path,
+            expected_joint_dim=self.robot.n_dof,
+            expected_joint_names=self.robot.dof_names,
+            require_joint_names=True,
+        )
         self.grasp_data["obj_path"] = str(resolve_from_root(self.grasp_data["obj_path"]))
-        validate_grasp_record(self.grasp_data, input_npy_path, require_assets=True)
+        validate_grasp_record(
+            self.grasp_data,
+            input_npy_path,
+            expected_joint_dim=self.robot.n_dof,
+            expected_joint_names=self.robot.dof_names,
+            require_joint_names=True,
+            require_assets=True,
+        )
 
         # Fix object mass by setting density
         obj_info = load_json(os.path.join(self.grasp_data["obj_path"], "info/simplified.json"))
@@ -97,9 +113,6 @@ class BaseEval:
         from ada_grasp_ctrl.utils.pin_helper import PinocchioHelper
         from ada_grasp_ctrl.utils.robot_adaptor import RobotAdaptor
 
-        robot_name = self.configs.hand_name
-        robot_prefix = "rh_" if "allegro" not in robot_name else ""
-        self.robot = RobotFactory.create_robot(robot_type=robot_name, prefix=robot_prefix)
         self.robot_model = PinocchioHelper(
             robot_file_path=self.robot.get_file_path("mjcf"),
             robot_file_type="mjcf",
