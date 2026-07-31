@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
+from typing import Any, Literal, TYPE_CHECKING
+
 from scipy.optimize import minimize
 from scipy.linalg import block_diag
 import numpy as np
@@ -10,7 +14,6 @@ from mr_utils.utils_calc import (
     sciR,
     skew,
 )
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .robot_adaptor import RobotAdaptor
@@ -22,6 +25,38 @@ from ada_grasp_ctrl.optimization import (
     friction_cone_slack,
     select_control_solution,
 )
+
+
+@dataclass(frozen=True)
+class _ControlProblemContext:
+    """Shared dimensions, kinematics, contact model, and target-pose data."""
+
+    num_arm_dof: int
+    num_hand_dof: int
+    num_dof: int
+    num_contacts: int
+    doa_to_dof: np.ndarray
+    joint_limits: np.ndarray
+    max_delta_qpos: np.ndarray
+    contact_forces: np.ndarray
+    contact_jacobian: np.ndarray
+    stiffness_jacobian: np.ndarray
+    hand_base_name: str
+    target_hand_base_position: np.ndarray
+    target_hand_base_orientation: Any
+
+
+@dataclass(frozen=True)
+class _ControlProblemDefinition:
+    """Callbacks, constraints, bounds, and initial state for one SLSQP solve."""
+
+    objective: Callable[[np.ndarray], float]
+    jacobian: Callable[[np.ndarray], np.ndarray]
+    constraints: list[dict[str, Any]]
+    constraint_names: tuple[str, ...]
+    bounds: list[tuple[float | None, float | None]]
+    initial_variables: np.ndarray
+    joint_limit_constraint: Callable[[np.ndarray], np.ndarray]
 
 
 class GraspController:
@@ -355,648 +390,746 @@ class GraspController:
 
         return metric, cf
 
-    def ctrl_opt(
+    def _prepare_control_problem(
         self,
-        stage,
-        dt,
-        curr_q_a,
-        curr_q_f,
-        target_q_f,
-        desired_sum_force,
-        last_dq_a,
-        ho_contacts=None,
-        grasp_matrix=None,
-        b_use_arm_motion=True,
-        b_print_opt_details=False,
-    ):
-        # hyper-parameters
-        mu = self.mu
+        *,
+        stage: int,
+        dt: float,
+        current_qpos_a: np.ndarray,
+        current_qpos_f: np.ndarray,
+        target_qpos_f: np.ndarray,
+        contacts: list[dict[str, Any]] | None,
+    ) -> _ControlProblemContext:
+        """Build shared dimensions, contact linearization, and target pose.
 
-        # variables for coding convenience
-        n_arm_dof = self.robot.arm.n_dof
-        n_hand_dof = self.robot.hand.n_dof
-        n_dof = n_arm_dof + n_hand_dof
-        doa2dof_matrix = self.robot_adaptor.doa2dof_matrix
-        joint_limits_f = self.robot_adaptor.joint_limits_f
-        q_step_max = np.asarray(self.robot.doa_max_vel) * dt
-        n_con = len(ho_contacts) if ho_contacts else 0
+        Args:
+            stage: Current control stage.
+            dt: Action interval in seconds.
+            current_qpos_a: Current actuator vector.
+            current_qpos_f: Current full-joint vector.
+            target_qpos_f: Target full-joint vector.
+            contacts: Current hand-object contacts.
 
-        if n_con:
-            # compute grasp matrix
-            contact_G = self.compute_grasp_matrix(ho_contacts) if grasp_matrix is None else grasp_matrix
-            # compute Ks and contact jacobian
-            updated_contacts, stacked = self.Ks(q_a=curr_q_a, q_f=curr_q_f, contacts=ho_contacts)
-            contact_force_all = np.concatenate([c["contact_force"][:3] for c in updated_contacts], axis=0)
-            contact_jaco_all = stacked["jaco_a"]
-            # whether use Ks_h
+        Returns:
+            Immutable context consumed by either optimization policy.
+        """
+        num_arm_dof = self.robot.arm.n_dof
+        num_hand_dof = self.robot.hand.n_dof
+        num_dof = num_arm_dof + num_hand_dof
+        contact_list = contacts or []
+        num_contacts = len(contact_list)
+        contact_jacobian = np.zeros((0, num_dof))
+        stiffness_jacobian = np.zeros((0, num_dof))
+        contact_forces = np.zeros(0)
+        if num_contacts:
+            updated_contacts, stacked = self.Ks(
+                q_a=current_qpos_a,
+                q_f=current_qpos_f,
+                contacts=contact_list,
+            )
+            contact_forces = np.concatenate(
+                [contact["contact_force"][:3] for contact in updated_contacts],
+                axis=0,
+            )
+            contact_jacobian = stacked["jaco_a"]
             if stage == 2 and self.stage2_Ks_hand_only:
-                Ks_all = stacked["Ks_h"]
-                contact_jaco_all[:, :n_arm_dof] = 0  # remove arm part
+                stiffness = stacked["Ks_h"]
+                contact_jacobian[:, :num_arm_dof] = 0
             else:
-                Ks_all = stacked["Ks"]
-            Ks_jaco = Ks_all @ contact_jaco_all
-        else:
-            contact_force_all = np.zeros((0))
+                stiffness = stacked["Ks"]
+            stiffness_jacobian = stiffness @ contact_jacobian
 
-        # compute target hand base pose
         hand_base_name = self.robot.hand.base_name
-        self.robot_adaptor.compute_fk_f(target_q_f)
-        target_hb_pose = self.robot_adaptor.get_frame_pose(frame_name=hand_base_name)
-        target_hb_pos, target_hb_ori = isometry3dToPosOri(target_hb_pose)
+        self.robot_adaptor.compute_fk_f(target_qpos_f)
+        target_hand_base_pose = self.robot_adaptor.get_frame_pose(frame_name=hand_base_name)
+        target_position, target_orientation = isometry3dToPosOri(target_hand_base_pose)
+        return _ControlProblemContext(
+            num_arm_dof=num_arm_dof,
+            num_hand_dof=num_hand_dof,
+            num_dof=num_dof,
+            num_contacts=num_contacts,
+            doa_to_dof=self.robot_adaptor.doa2dof_matrix,
+            joint_limits=self.robot_adaptor.joint_limits_f,
+            max_delta_qpos=np.asarray(self.robot.doa_max_vel) * dt,
+            contact_forces=contact_forces,
+            contact_jacobian=contact_jacobian,
+            stiffness_jacobian=stiffness_jacobian,
+            hand_base_name=hand_base_name,
+            target_hand_base_position=target_position,
+            target_hand_base_orientation=target_orientation,
+        )
 
-        # weights
+    def _solve_control_problem(
+        self,
+        *,
+        solver_name: str,
+        stage: int,
+        objective: Callable[[np.ndarray], float],
+        jacobian: Callable[[np.ndarray], np.ndarray],
+        constraints: list[dict[str, Any]],
+        bounds: Sequence[tuple[float | None, float | None]],
+        initial_variables: np.ndarray,
+        joint_limit_constraint: Callable[[np.ndarray], np.ndarray],
+        current_qpos_a: np.ndarray,
+        current_contact_forces: np.ndarray,
+        num_dof: int,
+        print_details: bool,
+    ) -> dict[str, np.ndarray]:
+        """Solve, diagnose, and safely select one control optimization result.
+
+        Args:
+            solver_name: Stable diagnostic identifier.
+            stage: Current control stage.
+            objective: Scalar objective callback.
+            jacobian: Objective-gradient callback.
+            constraints: SciPy SLSQP constraint dictionaries.
+            bounds: Per-variable lower and upper bounds.
+            initial_variables: Initial joint-delta/contact-force vector.
+            joint_limit_constraint: Joint-limit residual callback for diagnostics.
+            current_qpos_a: Current actuator vector used by rejection fallback.
+            current_contact_forces: Measured force vector used by rejection fallback.
+            num_dof: Leading joint-delta variable count.
+            print_details: Whether SciPy prints solver progress.
+
+        Returns:
+            Accepted or safely held actuator, delta, and contact-force vectors.
+        """
+        result = minimize(
+            fun=objective,
+            jac=jacobian,
+            constraints=constraints,
+            x0=initial_variables,
+            bounds=bounds,
+            method="SLSQP",
+            options={"ftol": 1e-6, "disp": print_details, "maxiter": 200},
+        )
+        diagnostics = diagnose_slsqp_result(
+            result,
+            constraints,
+            bounds,
+            joint_limit_constraint=joint_limit_constraint,
+        )
+        self._record_solver_diagnostic(solver_name, diagnostics, stage=stage)
+        qpos_a, delta_qpos_a, contact_forces = select_control_solution(
+            current_qpos_a,
+            current_contact_forces,
+            result.x,
+            num_dof,
+            diagnostics,
+        )
+        return {"q_a": qpos_a, "dq_a": delta_qpos_a, "cf": contact_forces}
+
+    def _build_control_problem(
+        self,
+        *,
+        policy: Literal["coordinated", "equal_contact"],
+        context: _ControlProblemContext,
+        stage: int,
+        dt: float,
+        current_qpos_a: np.ndarray,
+        target_qpos_f: np.ndarray,
+        last_delta_qpos_a: np.ndarray,
+        desired_sum_force: float | None,
+        desired_forces: np.ndarray | None,
+        contacts: list[dict[str, Any]] | None,
+        grasp_matrix: np.ndarray | None,
+        use_arm_motion: bool,
+    ) -> _ControlProblemDefinition:
+        """Build one shared SLSQP problem with policy-specific force terms.
+
+        Args:
+            policy: Coordinated wrench control or equal-contact force control.
+            context: Shared dimensions, kinematics, and contact linearization.
+            stage: Current control stage, either 1 or 2.
+            dt: Action interval in seconds.
+            current_qpos_a: Current actuator vector.
+            target_qpos_f: Target full-joint vector.
+            last_delta_qpos_a: Previously applied actuator delta.
+            desired_sum_force: Desired total normal force when constrained.
+            desired_forces: Per-contact desired force vectors for equal-contact control.
+            contacts: Current hand-object contacts.
+            grasp_matrix: Optional precomputed grasp matrix.
+            use_arm_motion: Whether stage 1 may move the arm.
+
+        Returns:
+            Complete solver callbacks, constraints, bounds, and initial state.
+
+        Raises:
+            ValueError: If ``policy`` or ``stage`` is unsupported.
+        """
+        if policy not in {"coordinated", "equal_contact"}:
+            raise ValueError(f"Unsupported control optimization policy: {policy}")
+        if stage not in {1, 2}:
+            raise ValueError(f"Unsupported control optimization stage: {stage}")
+
+        coordinated = policy == "coordinated"
+        n_arm_dof = context.num_arm_dof
+        n_hand_dof = context.num_hand_dof
+        n_dof = context.num_dof
+        n_con = context.num_contacts
+        doa2dof_matrix = context.doa_to_dof
+        contact_force_all = context.contact_forces
+        contact_jaco_all = context.contact_jacobian
+        contact_jaco_h = contact_jaco_all[:, -n_hand_dof:]
+        stiffness_jaco = context.stiffness_jacobian
+
+        contact_grasp_matrix = None
+        if coordinated and n_con:
+            contact_grasp_matrix = self.compute_grasp_matrix(contacts) if grasp_matrix is None else grasp_matrix
+
         w_hb_pose = np.diag([0, 0, 100.0, 10.0, 10.0, 10.0])
-        w_q_hand = 1.0 * np.eye(n_hand_dof)
-        w_dqa = 0.01 * np.eye(n_dof)  #  <= 0.01
-        # w_ddqa = [0.00001] * n_arm_dof + [0.001] * n_hand_dof
-        w_ddqa = [0.001] * n_arm_dof + [0.001] * n_hand_dof
-        w_ddqa = np.diag(w_ddqa)
-        w_cp = np.diag([0.0, self.tan_motion_pen_weight, self.tan_motion_pen_weight])
-        w_cp = block_diag(*[w_cp for _ in range(n_con)])
-        w_cf = np.diag([0.0, 0.1, 0.1])
-        w_cf = block_diag(*[w_cf for _ in range(n_con)])
-        w_wrench = np.diag([1.0, 1, 1, 1, 1, 1])
-        w_efj = 0.01 * np.eye(n_hand_dof)
+        w_q_hand = np.eye(n_hand_dof)
+        w_dqa = 0.01 * np.eye(n_dof)
+        w_ddqa = np.diag([0.001] * n_dof)
+        single_contact_motion_weight = np.diag([0.0, self.tan_motion_pen_weight, self.tan_motion_pen_weight])
+        w_cp = block_diag(*[single_contact_motion_weight for _ in range(n_con)])
+        single_contact_force_weight = np.diag([0.0, 0.1, 0.1]) if coordinated else np.eye(3)
+        w_cf = block_diag(*[single_contact_force_weight for _ in range(n_con)])
+        w_wrench = np.eye(6)
+        w_equal_joint_force = 0.01 * np.eye(n_hand_dof)
 
-        if stage == 2 and n_con > 0:
+        if stage == 2 and n_con:
             in_contact_q_indices = contact_jaco_all.any(axis=0)
-            contact_jaco_h = contact_jaco_all[:, -n_hand_dof:]
             in_contact_qh_indices = contact_jaco_h.any(axis=0)
             if self.stage2_incontact_force_only:
-                # in-contact joint, no position control
                 w_q_hand[in_contact_qh_indices, in_contact_qh_indices] = 0
             if self.stage2_penalize_contact_qda:
                 w_dqa[in_contact_q_indices, in_contact_q_indices] *= 100
 
-        def objective(x):
+        def objective(x: np.ndarray) -> float:
+            """Evaluate the common objective plus policy-specific force costs.
+
+            Args:
+                x: Joint-delta variables followed by contact-force variables.
+
+            Returns:
+                Scalar weighted objective value.
+            """
             dq_a = x[:n_dof].copy()
             cf = x[n_dof:].copy()
-            q_a = curr_q_a + dq_a
+            q_a = current_qpos_a + dq_a
             q_f = doa2dof_matrix @ q_a
-            _, q_hand = q_f[:n_arm_dof], q_f[n_arm_dof:]
+            q_hand = q_f[n_arm_dof:]
 
-            # cost for hand qpos
-            target_q_hand = target_q_f[n_arm_dof:]
+            target_q_hand = target_qpos_f[n_arm_dof:]
             self.err_q_hand = err_q_hand = (q_hand - target_q_hand).reshape(-1, 1)
             cost_q_hand = err_q_hand.T @ w_q_hand @ err_q_hand
 
-            # cost for dqa
             self.err_dqa = err_dqa = (dq_a / dt).reshape(-1, 1)
             cost_dqa = err_dqa.T @ w_dqa @ err_dqa
 
-            # cost for ddqa
-            self.err_ddqa = err_ddqa = ((dq_a - last_dq_a) / dt**2).reshape(-1, 1)
+            self.err_ddqa = err_ddqa = ((dq_a - last_delta_qpos_a) / dt**2).reshape(-1, 1)
             cost_ddqa = err_ddqa.T @ w_ddqa @ err_ddqa
 
-            cost_wrench = 0
             cost_tan_motion = 0
+            cost_policy_force = 0
             cost_tan_cf = 0
-            cost_ef = 0
-            if n_con > 0:
-                if stage == 1 or self.stage2_penalize_tan_motion:
-                    # cost tangential motion (restrict the tangential motion of contacts)
-                    dp = contact_jaco_all @ dq_a.reshape(-1, 1)
-                    self.err_cp = err_cp = dp
+            cost_equal_joint_force = 0
+            if n_con:
+                penalize_tan_motion = stage == 1 or (coordinated and self.stage2_penalize_tan_motion)
+                if penalize_tan_motion:
+                    self.err_cp = err_cp = contact_jaco_all @ dq_a.reshape(-1, 1)
                     cost_tan_motion = err_cp.T @ w_cp @ err_cp
 
-                if stage == 2:
-                    # cost wrench
-                    self.wrench = wrench = contact_G @ cf.reshape(-1, 1)
-                    cost_wrench = wrench.T @ w_wrench @ wrench
-
-                    # cost tangential force
+                if stage == 2 and coordinated:
+                    self.wrench = wrench = contact_grasp_matrix @ cf.reshape(-1, 1)
+                    cost_policy_force = wrench.T @ w_wrench @ wrench
                     if self.stage2_ctrl_tan_force:
-                        dcf = Ks_jaco @ dq_a.reshape(-1, 1)
-                        pred_next_cf = contact_force_all.reshape(-1, 1) + dcf
-                        self.err_cf = err_cf = cf.reshape(-1, 1) - pred_next_cf
+                        predicted_force = contact_force_all.reshape(-1, 1) + stiffness_jaco @ dq_a.reshape(-1, 1)
+                        self.err_cf = err_cf = cf.reshape(-1, 1) - predicted_force
                         cost_tan_cf = err_cf.T @ w_cf @ err_cf
-
-                    # cost equal force
                     if self.stage2_equal_joint_force_cost:
-                        idx_normal = np.arange(0, n_con * 3, 3)
-                        J_n = contact_jaco_h[idx_normal, :]
-                        self.err_ef = tau_n = J_n.T @ cf.reshape(-1, 3)[:, 0].reshape(-1, 1)
-                        cost_ef = tau_n.T @ w_efj @ tau_n
+                        normal_indices = np.arange(0, n_con * 3, 3)
+                        normal_jacobian = contact_jaco_h[normal_indices, :]
+                        normal_forces = cf.reshape(-1, 3)[:, 0].reshape(-1, 1)
+                        self.err_ef = tau_normal = normal_jacobian.T @ normal_forces
+                        cost_equal_joint_force = tau_normal.T @ w_equal_joint_force @ tau_normal
+                elif stage == 2:
+                    self.err_cf = err_cf = (cf.reshape(-1, 3) - desired_forces).reshape(-1, 1)
+                    cost_policy_force = err_cf.T @ w_cf @ err_cf
 
             cost_hb_pose = 0
-            if stage == 1 and b_use_arm_motion:
+            if stage == 1 and use_arm_motion:
                 self.robot_adaptor.compute_fk_a(q_a)
-                hb_pose = self.robot_adaptor.get_frame_pose(frame_name=hand_base_name)
-                hb_pos, hb_quat = isometry3dToPosQuat(hb_pose)
-                err_hb_pos = hb_pos - target_hb_pos
-                hb_ori = sciR.from_quat(hb_quat)
-                err_hb_ori = (hb_ori * target_hb_ori.inv()).as_rotvec()
-                self.err_hb_pose = err_hb_pose = np.concatenate([err_hb_pos, err_hb_ori], axis=0).reshape(-1, 1)  # 6D
+                hand_base_pose = self.robot_adaptor.get_frame_pose(frame_name=context.hand_base_name)
+                hand_base_position, hand_base_quaternion = isometry3dToPosQuat(hand_base_pose)
+                position_error = hand_base_position - context.target_hand_base_position
+                hand_base_orientation = sciR.from_quat(hand_base_quaternion)
+                orientation_error = (hand_base_orientation * context.target_hand_base_orientation.inv()).as_rotvec()
+                self.err_hb_pose = err_hb_pose = np.concatenate([position_error, orientation_error], axis=0).reshape(
+                    -1, 1
+                )
                 cost_hb_pose = err_hb_pose.T @ w_hb_pose @ err_hb_pose
 
             total_cost = (
                 cost_dqa
                 + cost_ddqa
                 + cost_q_hand
-                + cost_wrench
                 + cost_tan_motion
+                + cost_policy_force
                 + cost_tan_cf
+                + cost_equal_joint_force
                 + cost_hb_pose
-                + cost_ef
             )
             return total_cost.item()
 
-        def jacobian(x):
+        def jacobian(x: np.ndarray) -> np.ndarray:
+            """Evaluate the analytic gradient matching :func:`objective`.
+
+            Args:
+                x: Joint-delta variables followed by contact-force variables.
+
+            Returns:
+                Dense objective gradient aligned with ``x``.
+            """
             dq_a = x[:n_dof].copy()
-            q_a = curr_q_a + dq_a
-            grad = np.zeros(x.shape[0])
+            q_a = current_qpos_a + dq_a
+            gradient = np.zeros(x.shape[0])
 
-            # grad of cost_dqa
-            err_dqa = self.err_dqa
-            grad_dqa = 2.0 / dt * w_dqa @ err_dqa
-            grad[:n_dof] += grad_dqa.reshape(-1)
+            grad_dqa = 2.0 / dt * w_dqa @ self.err_dqa
+            gradient[:n_dof] += grad_dqa.reshape(-1)
+            grad_ddqa = 2.0 / dt**2 * w_ddqa @ self.err_ddqa
+            gradient[:n_dof] += grad_ddqa.reshape(-1)
+            hand_mapping = doa2dof_matrix[n_arm_dof:, :]
+            grad_q_hand = 2.0 * hand_mapping.T @ w_q_hand @ self.err_q_hand
+            gradient[:n_dof] += grad_q_hand.reshape(-1)
 
-            # grad of cost_ddqa
-            err_ddqa = self.err_ddqa
-            grad_dqa = 2.0 / dt**2 * w_ddqa @ err_ddqa
-            grad[:n_dof] += grad_dqa.reshape(-1)
+            if n_con:
+                penalize_tan_motion = stage == 1 or (coordinated and self.stage2_penalize_tan_motion)
+                if penalize_tan_motion:
+                    grad_tan_motion = 2.0 * contact_jaco_all.T @ w_cp @ self.err_cp
+                    gradient[:n_dof] += grad_tan_motion.reshape(-1)
 
-            # grad of cost_q_hand
-            J_qhand_dqa = doa2dof_matrix[n_arm_dof:, :]  # (n_hand_dof, n_dof)
-            err_q_hand = self.err_q_hand
-            grad_dqa = 2.0 * (J_qhand_dqa.T @ w_q_hand @ err_q_hand).reshape(-1)  # shape: (n_dof,)
-            grad[:n_dof] += grad_dqa.reshape(-1)
-
-            if n_con > 0:
-                if stage == 1:
-                    # grad of cost_tan_motion
-                    err_cp = self.err_cp
-                    grad_dqa = 2.0 * (contact_jaco_all.T @ w_cp @ err_cp).reshape(-1)  # shape (n_dof,)
-                    grad[:n_dof] += grad_dqa.reshape(-1)
-
-                if stage == 2:
-                    # grad of cost_wrench
-                    wrench = self.wrench
-                    grad_cf = 2 * (contact_G.T @ w_wrench @ wrench)  # shape (n, 1)
-                    grad[n_dof:] += grad_cf.reshape(-1)
-
-                    if self.stage2_ctrl_tan_force and (not self.stage2_tan_force_constraint):
-                        # grad of cost_tan_cf
-                        err_cf = self.err_cf
-                        grad_dqa = -2 * Ks_jaco.T @ w_cf @ err_cf  # shape: (n_dof, 1)
-                        grad_cf = 2 * w_cf @ err_cf  # shape: (n_con * 3, 1)
-                        grad[:n_dof] += grad_dqa.reshape(-1)
-                        grad[n_dof:] += grad_cf.reshape(-1)
-
+                if stage == 2 and coordinated:
+                    grad_wrench = 2 * contact_grasp_matrix.T @ w_wrench @ self.wrench
+                    gradient[n_dof:] += grad_wrench.reshape(-1)
+                    if self.stage2_ctrl_tan_force:
+                        grad_tan_dqa = -2 * stiffness_jaco.T @ w_cf @ self.err_cf
+                        grad_tan_cf = 2 * w_cf @ self.err_cf
+                        gradient[:n_dof] += grad_tan_dqa.reshape(-1)
+                        gradient[n_dof:] += grad_tan_cf.reshape(-1)
                     if self.stage2_equal_joint_force_cost:
-                        err_ef = self.err_ef
-                        idx = np.arange(n_con) * 3 + 0
-                        J_n = contact_jaco_h[idx, :]
-                        grad_ef = (2 * J_n @ w_efj @ err_ef).flatten()
-                        grad[n_dof + idx] += grad_ef.reshape(-1)
+                        normal_indices = np.arange(n_con) * 3
+                        normal_jacobian = contact_jaco_h[normal_indices, :]
+                        grad_equal_force = 2 * normal_jacobian @ w_equal_joint_force @ self.err_ef
+                        gradient[n_dof + normal_indices] += grad_equal_force.reshape(-1)
+                elif stage == 2:
+                    gradient[n_dof:] += (2 * w_cf @ self.err_cf).reshape(-1)
 
-            if stage == 1 and b_use_arm_motion:
-                # grad of cost_hb_pose
+            if stage == 1 and use_arm_motion:
                 self.robot_adaptor.compute_jaco_a(q_a)
-                hb_jaco = self.robot_adaptor.get_frame_jaco(frame_name=hand_base_name, type="space")
-                err_hb_pose = self.err_hb_pose
-                grad_dqa = 2.0 * hb_jaco.T @ w_hb_pose @ err_hb_pose
-                grad[:n_dof] += grad_dqa.reshape(-1)
+                hand_base_jacobian = self.robot_adaptor.get_frame_jaco(
+                    frame_name=context.hand_base_name,
+                    type="space",
+                )
+                grad_hb_pose = 2.0 * hand_base_jacobian.T @ w_hb_pose @ self.err_hb_pose
+                gradient[:n_dof] += grad_hb_pose.reshape(-1)
+            return gradient
 
-            return grad
+        full_contact_model = not coordinated or self.stage2_tan_force_constraint
 
-        def contact_model_constraint(x):
+        def contact_model_constraint(x: np.ndarray) -> np.ndarray:
+            """Match optimized forces to the linearized contact stiffness model.
+
+            Args:
+                x: Joint-delta variables followed by contact-force variables.
+
+            Returns:
+                Equality residual for full forces or normal forces only.
+            """
             dq_a = x[:n_dof].copy()
-            cf = x[n_dof:].copy()
-            dcf = cf - contact_force_all
+            force_delta = x[n_dof:].copy() - contact_force_all
+            error = force_delta.reshape(-1, 1) - stiffness_jaco @ dq_a.reshape(-1, 1)
+            if full_contact_model:
+                return error.reshape(-1)
+            return error.reshape(-1, 3)[:, 0].reshape(-1)
 
-            err = dcf.reshape(-1, 1) - Ks_jaco @ dq_a.reshape(-1, 1)
-            if self.stage2_tan_force_constraint:
-                constraint = err.reshape(-1, 3)
-            else:
-                constraint = err.reshape(-1, 3)[:, 0]  # only constrain the normal forces
-            return constraint.reshape(-1)  # == 0
+        def contact_model_constraint_grad(x: np.ndarray) -> np.ndarray:
+            """Return the constant contact-model constraint Jacobian.
 
-        def contact_model_constraint_grad(x):
-            if self.stage2_tan_force_constraint:
+            Args:
+                x: Solver variables, unused because the model is linearized.
+
+            Returns:
+                Dense constraint Jacobian aligned with ``x``.
+            """
+            del x
+            if full_contact_model:
                 grad_cf = np.eye(3 * n_con)
-                grad_dq_a = -Ks_jaco
+                grad_dq_a = -stiffness_jaco
             else:
-                idx_normal = np.arange(0, n_con * 3, 3)
+                normal_indices = np.arange(0, n_con * 3, 3)
                 grad_cf = np.zeros((n_con, 3 * n_con))
-                grad_cf[np.arange(n_con), idx_normal] = 1.0
-                grad_dq_a = -Ks_jaco[idx_normal, :]
+                grad_cf[np.arange(n_con), normal_indices] = 1.0
+                grad_dq_a = -stiffness_jaco[normal_indices, :]
+            return np.hstack([grad_dq_a, grad_cf])
 
-            jacobian = np.hstack([grad_dq_a, grad_cf])
-            return jacobian  # shape: (n_contacts, x_dim)
+        def increase_normal_force_constraint(x: np.ndarray) -> np.ndarray:
+            """Require nonnegative predicted normal-force increments.
 
-        def increase_normal_force_constraint(x):
-            dq_a = x[:n_dof].copy()
-            dcf = Ks_jaco @ dq_a.reshape(-1, 1)
-            constraint = dcf.reshape(-1, 3)[:, 0]
-            return constraint.reshape(-1)  # >= 0
+            Args:
+                x: Joint-delta variables followed by contact-force variables.
 
-        def increase_normal_force_constraint_grad(x):
-            idx_normal = np.arange(0, n_con * 3, 3)
-            grad_dq_a = Ks_jaco[idx_normal, :]
+            Returns:
+                Per-contact predicted normal-force increments.
+            """
+            force_delta = stiffness_jaco @ x[:n_dof].reshape(-1, 1)
+            return force_delta.reshape(-1, 3)[:, 0].reshape(-1)
+
+        def increase_normal_force_constraint_grad(x: np.ndarray) -> np.ndarray:
+            """Return the constant normal-force-increase Jacobian.
+
+            Args:
+                x: Solver variables, unused because the model is linearized.
+
+            Returns:
+                Dense constraint Jacobian aligned with ``x``.
+            """
+            del x
+            normal_indices = np.arange(0, n_con * 3, 3)
+            grad_dq_a = stiffness_jaco[normal_indices, :]
             grad_cf = np.zeros((n_con, 3 * n_con))
-            jacobian = np.hstack([grad_dq_a, grad_cf])
-            return jacobian
+            return np.hstack([grad_dq_a, grad_cf])
 
-        def q_limits_constraint(x):
-            dq_a = x[:n_dof].copy()
-            q_a = curr_q_a + dq_a
+        def q_limits_constraint(x: np.ndarray) -> np.ndarray:
+            """Return nonnegative lower- and upper-joint-limit slack.
+
+            Args:
+                x: Joint-delta variables followed by contact-force variables.
+
+            Returns:
+                Lower- then upper-limit slack for every full joint.
+            """
+            q_a = current_qpos_a + x[:n_dof]
             q_f = doa2dof_matrix @ q_a.reshape(-1, 1)
+            signs = np.concatenate([-np.eye(n_dof), np.eye(n_dof)], axis=0)
+            offsets = np.concatenate(
+                [context.joint_limits[0, :], -context.joint_limits[1, :]],
+                axis=0,
+            ).reshape(-1, 1)
+            return -(signs @ q_f + offsets).reshape(-1)
 
-            In = np.eye(n_dof)
-            A = np.concatenate([-In, In], axis=0)
-            b = np.concatenate([joint_limits_f[0, :], -joint_limits_f[1, :]], axis=0).reshape(-1, 1)
-            constraint = A @ q_f + b
-            return -constraint.reshape(-1)  # >= 0
+        def q_limits_constraint_grad(x: np.ndarray) -> np.ndarray:
+            """Return the constant joint-limit constraint Jacobian.
 
-        def q_limits_constraint_grad(x):
-            grad = np.zeros((2 * n_dof, len(x)))  # shape: (2*n_dof, len(x))
-            A = np.concatenate([-np.eye(n_dof), np.eye(n_dof)], axis=0)
-            grad_wrt_dq_a = -A @ doa2dof_matrix
-            grad[:, :n_dof] = grad_wrt_dq_a
-            return grad
+            Args:
+                x: Solver variables used to size the dense Jacobian.
 
-        def friction_cone_constraint(x):
+            Returns:
+                Dense joint-limit Jacobian aligned with ``x``.
             """
-            Input normal forces must be positive.
+            gradient = np.zeros((2 * n_dof, len(x)))
+            signs = np.concatenate([-np.eye(n_dof), np.eye(n_dof)], axis=0)
+            gradient[:, :n_dof] = -signs @ doa2dof_matrix
+            return gradient
+
+        def friction_cone_constraint(x: np.ndarray) -> np.ndarray:
+            """Return nonnegative circular Coulomb friction-cone slack.
+
+            Args:
+                x: Joint-delta variables followed by contact-force variables.
+
+            Returns:
+                Per-contact friction-cone slack.
             """
-            cf = x[n_dof:].reshape(-1, 3)
-            return friction_cone_slack(cf, mu)
+            return friction_cone_slack(x[n_dof:].reshape(-1, 3), self.mu)
 
-        def friction_cone_constraint_grad(x):
-            cf = x[n_dof:].reshape(-1, 3)
-            fy, fz = cf[:, 1], cf[:, 2]
-            norm_yz = np.sqrt(fy**2 + fz**2) + 1e-8
-            grad = np.zeros((n_con, x.shape[0]))
-            idx = np.arange(n_con)
-            # The controller already used the correct constant normal
-            # derivative. Retain its historical tangential regularization so
-            # this bug fix changes only wrench-balance behavior at fx=0.
-            grad[idx, n_dof + 3 * idx] = mu
-            grad[idx, n_dof + 3 * idx + 1] = -fy / norm_yz
-            grad[idx, n_dof + 3 * idx + 2] = -fz / norm_yz
-            return grad
+        def friction_cone_constraint_grad(x: np.ndarray) -> np.ndarray:
+            """Return the regularized friction-cone Jacobian used by control.
 
-        def force_magnitude_constraint(x):
+            Args:
+                x: Joint-delta variables followed by contact-force variables.
+
+            Returns:
+                Dense friction-cone Jacobian aligned with ``x``.
             """
-            Input normal forces must be positive.
+            contact_forces = x[n_dof:].reshape(-1, 3)
+            fy, fz = contact_forces[:, 1], contact_forces[:, 2]
+            tangential_norm = np.sqrt(fy**2 + fz**2) + 1e-8
+            gradient = np.zeros((n_con, x.shape[0]))
+            indices = np.arange(n_con)
+            gradient[indices, n_dof + 3 * indices] = self.mu
+            gradient[indices, n_dof + 3 * indices + 1] = -fy / tangential_norm
+            gradient[indices, n_dof + 3 * indices + 2] = -fz / tangential_norm
+            return gradient
+
+        def force_magnitude_constraint(x: np.ndarray) -> np.ndarray:
+            """Return the desired total-normal-force residual.
+
+            Args:
+                x: Joint-delta variables followed by contact-force variables.
+
+            Returns:
+                Single total-normal-force residual.
             """
-            cf = x[n_dof:].reshape(-1, 3)
-            constraint = desired_sum_force - np.sum(cf[:, 0])  # == 0 / >= 0
-            return constraint.reshape(-1)
+            contact_forces = x[n_dof:].reshape(-1, 3)
+            return np.asarray(desired_sum_force - np.sum(contact_forces[:, 0])).reshape(-1)
 
-        def force_magnitude_constraint_grad(x):
-            n_vars = x.shape[0]
-            grad = np.zeros((1, n_vars))  # shape: (1, len(x))
-            idx = np.arange(n_con) * 3 + 0  # index of normal force in each contact
-            grad[0, n_dof + idx] = -1.0
-            return grad  # shape: (1, len(x))
+        def force_magnitude_constraint_grad(x: np.ndarray) -> np.ndarray:
+            """Return the total-normal-force constraint Jacobian.
 
-        def arm_doa_constraint(x):
-            dq_a_arm = x[:n_arm_dof].copy()
-            constraint = dq_a_arm - 0  # == 0
-            return constraint.reshape(-1)
+            Args:
+                x: Solver variables used to size the dense Jacobian.
 
-        def arm_doa_constraint_grad(x):
-            grad = np.zeros((n_arm_dof, x.shape[0]))
-            grad[:, :n_arm_dof] = np.eye(n_arm_dof)
-            return grad
+            Returns:
+                One-row force-magnitude Jacobian.
+            """
+            gradient = np.zeros((1, x.shape[0]))
+            normal_indices = np.arange(n_con) * 3
+            gradient[0, n_dof + normal_indices] = -1.0
+            return gradient
 
+        def arm_doa_constraint(x: np.ndarray) -> np.ndarray:
+            """Require zero arm actuator delta.
+
+            Args:
+                x: Joint-delta variables followed by contact-force variables.
+
+            Returns:
+                Arm actuator deltas as equality residuals.
+            """
+            return x[:n_arm_dof].copy().reshape(-1)
+
+        def arm_doa_constraint_grad(x: np.ndarray) -> np.ndarray:
+            """Return the constant frozen-arm constraint Jacobian.
+
+            Args:
+                x: Solver variables used to size the dense Jacobian.
+
+            Returns:
+                Dense frozen-arm Jacobian aligned with ``x``.
+            """
+            gradient = np.zeros((n_arm_dof, x.shape[0]))
+            gradient[:, :n_arm_dof] = np.eye(n_arm_dof)
+            return gradient
+
+        constraints: list[dict[str, Any]] = []
+        constraint_names: list[str] = []
+
+        def add_constraint(
+            name: str,
+            constraint_type: Literal["eq", "ineq"],
+            function: Callable[[np.ndarray], np.ndarray],
+            gradient: Callable[[np.ndarray], np.ndarray],
+        ) -> None:
+            """Append one named SciPy constraint while retaining solver order.
+
+            Args:
+                name: Stable test and diagnostic name.
+                constraint_type: SciPy equality or inequality type.
+                function: Constraint residual callback.
+                gradient: Constraint Jacobian callback.
+
+            Returns:
+                None.
+            """
+            constraint_names.append(name)
+            constraints.append(dict(type=constraint_type, fun=function, jac=gradient))
+
+        add_constraint("q_limits", "ineq", q_limits_constraint, q_limits_constraint_grad)
         if stage == 1:
-            if n_con == 0:
-                constraints_list = [dict(type="ineq", fun=q_limits_constraint, jac=q_limits_constraint_grad)]
-            else:
-                constraints_list = [
-                    dict(type="ineq", fun=q_limits_constraint, jac=q_limits_constraint_grad),
-                    dict(type="eq", fun=contact_model_constraint, jac=contact_model_constraint_grad),
-                    dict(type="ineq", fun=force_magnitude_constraint, jac=force_magnitude_constraint_grad),
-                ]
-            if not b_use_arm_motion:
-                constraints_list.append(dict(type="eq", fun=arm_doa_constraint, jac=arm_doa_constraint_grad))
-        elif stage == 2:
-            if n_con == 0:
-                constraints_list = [
-                    dict(type="ineq", fun=q_limits_constraint, jac=q_limits_constraint_grad),
-                    dict(type="eq", fun=arm_doa_constraint, jac=arm_doa_constraint_grad),
-                ]
-            else:
-                constraints_list = [
-                    dict(type="ineq", fun=q_limits_constraint, jac=q_limits_constraint_grad),
-                    dict(type="eq", fun=arm_doa_constraint, jac=arm_doa_constraint_grad),
-                    dict(type="eq", fun=contact_model_constraint, jac=contact_model_constraint_grad),
-                    dict(type="ineq", fun=friction_cone_constraint, jac=friction_cone_constraint_grad),
-                    dict(type="eq", fun=force_magnitude_constraint, jac=force_magnitude_constraint_grad),
-                ]
-                if self.stage2_increase_force:
-                    constraints_list.append(
-                        dict(
-                            type="ineq", fun=increase_normal_force_constraint, jac=increase_normal_force_constraint_grad
+            if n_con:
+                add_constraint("contact_model", "eq", contact_model_constraint, contact_model_constraint_grad)
+                add_constraint("force_magnitude", "ineq", force_magnitude_constraint, force_magnitude_constraint_grad)
+            if coordinated and not use_arm_motion:
+                add_constraint("arm_doa", "eq", arm_doa_constraint, arm_doa_constraint_grad)
+        else:
+            add_constraint("arm_doa", "eq", arm_doa_constraint, arm_doa_constraint_grad)
+            if n_con:
+                add_constraint("contact_model", "eq", contact_model_constraint, contact_model_constraint_grad)
+                if coordinated:
+                    add_constraint("friction_cone", "ineq", friction_cone_constraint, friction_cone_constraint_grad)
+                    add_constraint("force_magnitude", "eq", force_magnitude_constraint, force_magnitude_constraint_grad)
+                    if self.stage2_increase_force:
+                        add_constraint(
+                            "increase_normal_force",
+                            "ineq",
+                            increase_normal_force_constraint,
+                            increase_normal_force_constraint_grad,
                         )
-                    )
 
-        bounds_dq = [(-q_step_max[i], q_step_max[i]) for i in range(q_step_max.shape[0])]
+        bounds_dq = [(-limit, limit) for limit in context.max_delta_qpos]
         bounds_cf = [(0, 100), (-50, 50), (-50, 50)] * n_con
-        bounds = bounds_dq + bounds_cf
-        x0 = np.concatenate([np.zeros((n_dof)), contact_force_all], axis=0)
-
-        res = minimize(
-            fun=objective,
-            jac=jacobian,
-            constraints=constraints_list,
-            x0=x0,
-            bounds=bounds,
-            method="SLSQP",
-            options={"ftol": 1e-6, "disp": b_print_opt_details, "maxiter": 200},
-        )
-
-        diagnostics = diagnose_slsqp_result(
-            res,
-            constraints_list,
-            bounds,
+        return _ControlProblemDefinition(
+            objective=objective,
+            jacobian=jacobian,
+            constraints=constraints,
+            constraint_names=tuple(constraint_names),
+            bounds=bounds_dq + bounds_cf,
+            initial_variables=np.concatenate([np.zeros(n_dof), contact_force_all], axis=0),
             joint_limit_constraint=q_limits_constraint,
         )
-        self._record_solver_diagnostic("control", diagnostics, stage=stage)
-        q_a, dq_a, cf = select_control_solution(
-            curr_q_a,
-            contact_force_all,
-            res.x,
-            n_dof,
-            diagnostics,
+
+    def _optimize_control(
+        self,
+        *,
+        policy: Literal["coordinated", "equal_contact"],
+        solver_name: str,
+        stage: int,
+        dt: float,
+        current_qpos_a: np.ndarray,
+        current_qpos_f: np.ndarray,
+        target_qpos_f: np.ndarray,
+        last_delta_qpos_a: np.ndarray,
+        desired_sum_force: float | None,
+        desired_forces: np.ndarray | None,
+        contacts: list[dict[str, Any]] | None,
+        grasp_matrix: np.ndarray | None,
+        use_arm_motion: bool,
+        print_details: bool,
+    ) -> dict[str, np.ndarray]:
+        """Prepare, build, solve, and validate either control policy.
+
+        Args:
+            policy: Coordinated wrench control or equal-contact force control.
+            solver_name: Stable diagnostic identifier.
+            stage: Current control stage.
+            dt: Action interval in seconds.
+            current_qpos_a: Current actuator vector.
+            current_qpos_f: Current full-joint vector.
+            target_qpos_f: Target full-joint vector.
+            last_delta_qpos_a: Previously applied actuator delta.
+            desired_sum_force: Desired total normal force when constrained.
+            desired_forces: Per-contact desired forces for equal-contact control.
+            contacts: Current hand-object contacts.
+            grasp_matrix: Optional precomputed grasp matrix.
+            use_arm_motion: Whether stage 1 may move the arm.
+            print_details: Whether SciPy prints solver progress.
+
+        Returns:
+            Accepted or safely held actuator, delta, and contact-force vectors.
+        """
+        context = self._prepare_control_problem(
+            stage=stage,
+            dt=dt,
+            current_qpos_a=current_qpos_a,
+            current_qpos_f=current_qpos_f,
+            target_qpos_f=target_qpos_f,
+            contacts=contacts,
         )
-        return {"q_a": q_a, "dq_a": dq_a, "cf": cf}
+        problem = self._build_control_problem(
+            policy=policy,
+            context=context,
+            stage=stage,
+            dt=dt,
+            current_qpos_a=current_qpos_a,
+            target_qpos_f=target_qpos_f,
+            last_delta_qpos_a=last_delta_qpos_a,
+            desired_sum_force=desired_sum_force,
+            desired_forces=desired_forces,
+            contacts=contacts,
+            grasp_matrix=grasp_matrix,
+            use_arm_motion=use_arm_motion,
+        )
+        return self._solve_control_problem(
+            solver_name=solver_name,
+            stage=stage,
+            objective=problem.objective,
+            jacobian=problem.jacobian,
+            constraints=problem.constraints,
+            bounds=problem.bounds,
+            initial_variables=problem.initial_variables,
+            joint_limit_constraint=problem.joint_limit_constraint,
+            current_qpos_a=current_qpos_a,
+            current_contact_forces=context.contact_forces,
+            num_dof=context.num_dof,
+            print_details=print_details,
+        )
+
+    def ctrl_opt(
+        self,
+        stage: int,
+        dt: float,
+        curr_q_a: np.ndarray,
+        curr_q_f: np.ndarray,
+        target_q_f: np.ndarray,
+        desired_sum_force: float,
+        last_dq_a: np.ndarray,
+        ho_contacts: list[dict[str, Any]] | None = None,
+        grasp_matrix: np.ndarray | None = None,
+        b_use_arm_motion: bool = True,
+        b_print_opt_details: bool = False,
+    ) -> dict[str, np.ndarray]:
+        """Run coordinated wrench control through the shared optimizer.
+
+        Args:
+            stage: Current control stage.
+            dt: Action interval in seconds.
+            curr_q_a: Current actuator vector.
+            curr_q_f: Current full-joint vector.
+            target_q_f: Target full-joint vector.
+            desired_sum_force: Desired total normal force.
+            last_dq_a: Previously applied actuator delta.
+            ho_contacts: Current hand-object contacts.
+            grasp_matrix: Optional precomputed grasp matrix.
+            b_use_arm_motion: Whether stage 1 may move the arm.
+            b_print_opt_details: Whether SciPy prints solver progress.
+
+        Returns:
+            Accepted or safely held actuator, delta, and contact-force vectors.
+        """
+        return self._optimize_control(
+            policy="coordinated",
+            solver_name="control",
+            stage=stage,
+            dt=dt,
+            current_qpos_a=curr_q_a,
+            current_qpos_f=curr_q_f,
+            target_qpos_f=target_q_f,
+            last_delta_qpos_a=last_dq_a,
+            desired_sum_force=desired_sum_force,
+            desired_forces=None,
+            contacts=ho_contacts,
+            grasp_matrix=grasp_matrix,
+            use_arm_motion=b_use_arm_motion,
+            print_details=b_print_opt_details,
+        )
 
     def ctrl_opt_bs3(
         self,
-        stage,
-        dt,
-        curr_q_a,
-        curr_q_f,
-        target_q_f,
-        last_dq_a,
-        desired_sum_force=None,
-        desired_forces=None,
-        ho_contacts=None,
-        grasp_matrix=None,
-        b_print_opt_details=False,
-    ):
-        # variables for coding convenience
-        n_arm_dof = self.robot.arm.n_dof
-        n_hand_dof = self.robot.hand.n_dof
-        n_dof = n_arm_dof + n_hand_dof
-        doa2dof_matrix = self.robot_adaptor.doa2dof_matrix
-        n_con = len(ho_contacts)
-        joint_limits_f = self.robot_adaptor.joint_limits_f
-        q_step_max = np.asarray(self.robot.doa_max_vel) * dt
+        stage: int,
+        dt: float,
+        curr_q_a: np.ndarray,
+        curr_q_f: np.ndarray,
+        target_q_f: np.ndarray,
+        last_dq_a: np.ndarray,
+        desired_sum_force: float | None = None,
+        desired_forces: np.ndarray | None = None,
+        ho_contacts: list[dict[str, Any]] | None = None,
+        grasp_matrix: np.ndarray | None = None,
+        b_print_opt_details: bool = False,
+    ) -> dict[str, np.ndarray]:
+        """Run equal-contact force control through the shared optimizer.
 
-        if n_con:
-            # compute Ks and contact jacobian
-            updated_contacts, stacked = self.Ks(q_a=curr_q_a, q_f=curr_q_f, contacts=ho_contacts)
-            contact_force_all = np.concatenate([c["contact_force"][:3] for c in updated_contacts], axis=0)
-            contact_jaco_all = stacked["jaco_a"]
-            # whether use Ks_h
-            if stage == 2 and self.stage2_Ks_hand_only:
-                Ks_all = stacked["Ks_h"]
-                contact_jaco_all[:, :n_arm_dof] = 0  # remove arm part
-            else:
-                Ks_all = stacked["Ks"]
-            Ks_jaco = Ks_all @ contact_jaco_all
-        else:
-            contact_force_all = np.zeros((0))
+        Args:
+            stage: Current control stage.
+            dt: Action interval in seconds.
+            curr_q_a: Current actuator vector.
+            curr_q_f: Current full-joint vector.
+            target_q_f: Target full-joint vector.
+            last_dq_a: Previously applied actuator delta.
+            desired_sum_force: Desired stage-1 total normal force.
+            desired_forces: Per-contact desired stage-2 force vectors.
+            ho_contacts: Current hand-object contacts.
+            grasp_matrix: Accepted for API symmetry; not used by this policy.
+            b_print_opt_details: Whether SciPy prints solver progress.
 
-        # compute target hand base pose
-        hand_base_name = self.robot.hand.base_name
-        self.robot_adaptor.compute_fk_f(target_q_f)
-        target_hb_pose = self.robot_adaptor.get_frame_pose(frame_name=hand_base_name)
-        target_hb_pos, target_hb_ori = isometry3dToPosOri(target_hb_pose)
-
-        # compute target hand base pose
-        hand_base_name = self.robot.hand.base_name
-        self.robot_adaptor.compute_fk_f(target_q_f)
-        target_hb_pose = self.robot_adaptor.get_frame_pose(frame_name=hand_base_name)
-        target_hb_pos, target_hb_ori = isometry3dToPosOri(target_hb_pose)
-
-        # weights
-        w_hb_pose = np.diag([0, 0, 100.0, 10.0, 10.0, 10.0])
-        w_q_hand = 1.0 * np.eye(n_hand_dof)
-        w_dqa = 0.01 * np.eye(n_dof)  #  <= 0.01
-        w_ddqa = [0.001] * n_arm_dof + [0.001] * n_hand_dof
-        w_ddqa = np.diag(w_ddqa)
-        w_cp = np.diag([0.0, self.tan_motion_pen_weight, self.tan_motion_pen_weight])
-        w_cp = block_diag(*[w_cp for _ in range(n_con)])
-        w_cf = np.diag([1.0, 1.0, 1.0])
-        w_cf = block_diag(*[w_cf for _ in range(n_con)])
-
-        # desired forces of each contact
-        cf_d = desired_forces
-
-        if stage == 2 and n_con > 0:
-            in_contact_q_indices = contact_jaco_all.any(axis=0)
-            contact_jaco_h = contact_jaco_all[:, -n_hand_dof:]
-            in_contact_qh_indices = np.any(contact_jaco_h != 0, axis=0)
-            if self.stage2_incontact_force_only:
-                # in-contact joint, no position control
-                w_q_hand[in_contact_qh_indices, in_contact_qh_indices] = 0
-            if self.stage2_penalize_contact_qda:
-                w_dqa[in_contact_q_indices, in_contact_q_indices] *= 100
-
-        def objective(x):
-            dq_a = x[:n_dof].copy()
-            cf = x[n_dof:].copy()
-            q_a = curr_q_a + dq_a
-            q_f = doa2dof_matrix @ q_a
-            _, q_hand = q_f[:n_arm_dof], q_f[n_arm_dof:]
-
-            # cost for hand qpos
-            target_q_hand = target_q_f[n_arm_dof:]
-            self.err_q_hand = err_q_hand = (q_hand - target_q_hand).reshape(-1, 1)
-            cost_q_hand = err_q_hand.T @ w_q_hand @ err_q_hand
-
-            # cost for dqa
-            self.err_dqa = err_dqa = (dq_a / dt).reshape(-1, 1)
-            cost_dqa = err_dqa.T @ w_dqa @ err_dqa
-
-            # cost for ddqa
-            self.err_ddqa = err_ddqa = ((dq_a - last_dq_a) / dt**2).reshape(-1, 1)
-            cost_ddqa = err_ddqa.T @ w_ddqa @ err_ddqa
-
-            cost_tan_motion = 0
-            cost_cf = 0
-            if n_con > 0:
-                if stage == 1:
-                    # cost tangential motion (restrict the tangential motion of contacts)
-                    dp = contact_jaco_all @ dq_a.reshape(-1, 1)
-                    self.err_cp = err_cp = dp
-                    cost_tan_motion = err_cp.T @ w_cp @ err_cp
-
-                if stage == 2:
-                    self.err_cf = err_cf = (cf.reshape(-1, 3) - cf_d).reshape(-1, 1)
-                    cost_cf = err_cf.T @ w_cf @ err_cf
-
-            cost_hb_pose = 0
-            if stage == 1:
-                self.robot_adaptor.compute_fk_a(q_a)
-                hb_pose = self.robot_adaptor.get_frame_pose(frame_name=hand_base_name)
-                hb_pos, hb_quat = isometry3dToPosQuat(hb_pose)
-                err_hb_pos = hb_pos - target_hb_pos
-                hb_ori = sciR.from_quat(hb_quat)
-                err_hb_ori = (hb_ori * target_hb_ori.inv()).as_rotvec()
-                self.err_hb_pose = err_hb_pose = np.concatenate([err_hb_pos, err_hb_ori], axis=0).reshape(-1, 1)  # 6D
-                cost_hb_pose = err_hb_pose.T @ w_hb_pose @ err_hb_pose
-
-            total_cost = cost_dqa + cost_ddqa + cost_q_hand + cost_tan_motion + cost_cf + cost_hb_pose
-            return total_cost.item()
-
-        def jacobian(x):
-            dq_a = x[:n_dof].copy()
-            q_a = curr_q_a + dq_a
-            grad = np.zeros(x.shape[0])
-
-            # grad of cost_dqa
-            err_dqa = self.err_dqa
-            grad_dqa = 2.0 / dt * w_dqa @ err_dqa
-            grad[:n_dof] += grad_dqa.reshape(-1)
-
-            # grad of cost_ddqa
-            err_ddqa = self.err_ddqa
-            grad_dqa = 2.0 / dt**2 * w_ddqa @ err_ddqa
-            grad[:n_dof] += grad_dqa.reshape(-1)
-
-            # grad of cost_q_hand
-            J_qhand_dqa = doa2dof_matrix[n_arm_dof:, :]  # (n_hand_dof, n_dof)
-            err_q_hand = self.err_q_hand
-            grad_dqa = 2.0 * (J_qhand_dqa.T @ w_q_hand @ err_q_hand).reshape(-1)  # shape: (n_dof,)
-            grad[:n_dof] += grad_dqa.reshape(-1)
-
-            if n_con > 0:
-                if stage == 1:
-                    # grad of cost_tan_motion
-                    err_cp = self.err_cp
-                    grad_dqa = 2.0 * (contact_jaco_all.T @ w_cp @ err_cp).reshape(-1)  # shape (n_dof,)
-                    grad[:n_dof] += grad_dqa.reshape(-1)
-
-                if stage == 2:
-                    # grad of cost_cf
-                    err_cf = self.err_cf
-                    grad_cf = 2 * w_cf @ err_cf  # shape: (n_con * 3, 1)
-                    grad[n_dof:] += grad_cf.reshape(-1)
-
-            if stage == 1:
-                # grad of cost_hb_pose
-                self.robot_adaptor.compute_jaco_a(q_a)
-                hb_jaco = self.robot_adaptor.get_frame_jaco(frame_name=hand_base_name, type="space")
-                err_hb_pose = self.err_hb_pose
-                grad_dqa = 2.0 * hb_jaco.T @ w_hb_pose @ err_hb_pose
-                grad[:n_dof] += grad_dqa.reshape(-1)
-
-            return grad
-
-        def contact_model_constraint(x):
-            dq_a = x[:n_dof].copy()
-            cf = x[n_dof:].copy()
-            dcf = cf - contact_force_all
-
-            err = dcf.reshape(-1, 1) - Ks_jaco @ dq_a.reshape(-1, 1)
-            constraint = err.reshape(-1, 3)
-            return constraint.reshape(-1)  # == 0
-
-        def contact_model_constraint_grad(x):
-            grad_cf = np.eye(3 * n_con)
-            grad_dq_a = -Ks_jaco
-            jacobian = np.hstack([grad_dq_a, grad_cf])
-            return jacobian  # shape: (n_contacts, x_dim)
-
-        def q_limits_constraint(x):
-            dq_a = x[:n_dof].copy()
-            q_a = curr_q_a + dq_a
-            q_f = doa2dof_matrix @ q_a.reshape(-1, 1)
-
-            In = np.eye(n_dof)
-            A = np.concatenate([-In, In], axis=0)
-            b = np.concatenate([joint_limits_f[0, :], -joint_limits_f[1, :]], axis=0).reshape(-1, 1)
-            constraint = A @ q_f + b
-            return -constraint.reshape(-1)  # >= 0
-
-        def q_limits_constraint_grad(x):
-            grad = np.zeros((2 * n_dof, len(x)))  # shape: (2*n_dof, len(x))
-            A = np.concatenate([-np.eye(n_dof), np.eye(n_dof)], axis=0)
-            grad_wrt_dq_a = -A @ doa2dof_matrix
-            grad[:, :n_dof] = grad_wrt_dq_a
-            return grad
-
-        def force_magnitude_constraint(x):
-            """
-            Input normal forces must be positive.
-            """
-            cf = x[n_dof:].reshape(-1, 3)
-            constraint = desired_sum_force - np.sum(cf[:, 0])  # == 0 / >= 0
-            return constraint.reshape(-1)
-
-        def force_magnitude_constraint_grad(x):
-            n_vars = x.shape[0]
-            grad = np.zeros((1, n_vars))  # shape: (1, len(x))
-            idx = np.arange(n_con) * 3 + 0  # index of normal force in each contact
-            grad[0, n_dof + idx] = -1.0
-            return grad  # shape: (1, len(x))
-
-        def arm_doa_constraint(x):
-            dq_a_arm = x[:n_arm_dof].copy()
-            constraint = dq_a_arm - 0  # == 0
-            return constraint.reshape(-1)
-
-        def arm_doa_constraint_grad(x):
-            grad = np.zeros((n_arm_dof, x.shape[0]))
-            grad[:, :n_arm_dof] = np.eye(n_arm_dof)
-            return grad
-
-        if stage == 1:
-            if n_con == 0:
-                constraints_list = [dict(type="ineq", fun=q_limits_constraint, jac=q_limits_constraint_grad)]
-            else:
-                constraints_list = [
-                    dict(type="ineq", fun=q_limits_constraint, jac=q_limits_constraint_grad),
-                    dict(type="eq", fun=contact_model_constraint, jac=contact_model_constraint_grad),
-                    dict(type="ineq", fun=force_magnitude_constraint, jac=force_magnitude_constraint_grad),
-                ]
-        elif stage == 2:
-            if n_con == 0:
-                constraints_list = [
-                    dict(type="ineq", fun=q_limits_constraint, jac=q_limits_constraint_grad),
-                    dict(type="eq", fun=arm_doa_constraint, jac=arm_doa_constraint_grad),
-                ]
-            else:
-                constraints_list = [
-                    dict(type="ineq", fun=q_limits_constraint, jac=q_limits_constraint_grad),
-                    dict(type="eq", fun=arm_doa_constraint, jac=arm_doa_constraint_grad),
-                    dict(type="eq", fun=contact_model_constraint, jac=contact_model_constraint_grad),
-                ]
-
-        bounds_dq = [(-q_step_max[i], q_step_max[i]) for i in range(q_step_max.shape[0])]
-        bounds_cf = [(0, 100), (-50, 50), (-50, 50)] * n_con
-        bounds = bounds_dq + bounds_cf
-        x0 = np.concatenate([np.zeros((n_dof)), contact_force_all], axis=0)
-
-        res = minimize(
-            fun=objective,
-            jac=jacobian,
-            constraints=constraints_list,
-            x0=x0,
-            bounds=bounds,
-            method="SLSQP",
-            options={"ftol": 1e-6, "disp": b_print_opt_details, "maxiter": 200},
+        Returns:
+            Accepted or safely held actuator, delta, and contact-force vectors.
+        """
+        return self._optimize_control(
+            policy="equal_contact",
+            solver_name="control_bs3",
+            stage=stage,
+            dt=dt,
+            current_qpos_a=curr_q_a,
+            current_qpos_f=curr_q_f,
+            target_qpos_f=target_q_f,
+            last_delta_qpos_a=last_dq_a,
+            desired_sum_force=desired_sum_force,
+            desired_forces=desired_forces,
+            contacts=ho_contacts,
+            grasp_matrix=grasp_matrix,
+            use_arm_motion=True,
+            print_details=b_print_opt_details,
         )
-
-        diagnostics = diagnose_slsqp_result(
-            res,
-            constraints_list,
-            bounds,
-            joint_limit_constraint=q_limits_constraint,
-        )
-        self._record_solver_diagnostic("control_bs3", diagnostics, stage=stage)
-        q_a, dq_a, cf = select_control_solution(
-            curr_q_a,
-            contact_force_all,
-            res.x,
-            n_dof,
-            diagnostics,
-        )
-        return {"q_a": q_a, "dq_a": dq_a, "cf": cf}
