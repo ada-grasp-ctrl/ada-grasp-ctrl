@@ -7,6 +7,13 @@ import time
 
 import numpy as np
 
+from .episode_runner import (
+    DummyArmEpisodeRunner,
+    EpisodeStep,
+    StepControl,
+    run_dummy_arm_episode,
+)
+
 
 @dataclass(frozen=True)
 class WrenchControlPolicy:
@@ -15,8 +22,143 @@ class WrenchControlPolicy:
     use_approaching_arm_motion: bool
 
 
+class _CoordinatedWrenchPolicy:
+    """Implement ours/BS2 as one strategy with an arm-motion flag."""
+
+    def __init__(self, settings: WrenchControlPolicy):
+        """Store the sole public policy difference.
+
+        Args:
+            settings: Coordinated wrench-control policy settings.
+
+        Returns:
+            None.
+        """
+        self.settings = settings
+
+    def initialize(self, runner: DummyArmEpisodeRunner) -> None:
+        """Initialize stage and force-trajectory state.
+
+        Args:
+            runner: Prepared common episode runner.
+
+        Returns:
+            None.
+        """
+        evaluator = runner.evaluator
+        self.control_config = evaluator.configs.task.control
+        evaluator.desired_sum_force_as_traj = self.control_config.desired_sum_force_as_traj
+        evaluator.use_desired_sum_force_ub = self.control_config.use_desired_sum_force_ub
+        self.desired_sum_force_as_traj = evaluator.desired_sum_force_as_traj
+        self.use_desired_sum_force_ub = evaluator.use_desired_sum_force_ub
+        self.action_dt = evaluator.action_dt
+        self.debug = evaluator.configs.task.debug_viewer
+        self.final_sum_force = runner.grasp_ctrl.final_sum_force
+        self.desired_sum_force_upper = self.final_sum_force + 0.2
+        self.force_increment = self.final_sum_force / len(runner.path_squeeze)
+        self.last_delta_qpos_a = np.zeros(runner.robot.n_doa)
+        self.stage = 1
+        # Preserve the historical first-step Stage-2 edge case.
+        self.desired_sum_force = runner.grasp_ctrl.stage1_force_thres
+
+    def max_steps(self, runner: DummyArmEpisodeRunner) -> int:
+        """Allow at most twice the interpolated path length.
+
+        Args:
+            runner: Prepared common episode runner.
+
+        Returns:
+            Maximum number of control actions.
+        """
+        return len(runner.qpos_path) * 2
+
+    def should_stop(self, runner: DummyArmEpisodeRunner, step: EpisodeStep) -> bool:
+        """Stop after the path once total normal force exceeds its target.
+
+        Args:
+            runner: Prepared common episode runner.
+            step: Current sampled state.
+
+        Returns:
+            Whether the published terminal criterion is satisfied.
+        """
+        return step.index >= len(runner.qpos_path) and step.current_sum_force > self.final_sum_force
+
+    def control(self, runner: DummyArmEpisodeRunner, step: EpisodeStep) -> StepControl:
+        """Compute one coordinated wrench-control optimization command.
+
+        Args:
+            runner: Prepared common episode runner.
+            step: Current sampled state.
+
+        Returns:
+            Optimized actuator target and full historical diagnostics.
+        """
+        grasp_matrix = runner.grasp_ctrl.compute_grasp_matrix(step.contacts)
+        start = time.time()
+        balance_metric, _ = runner.grasp_ctrl.check_wrench_balance(
+            grasp_matrix,
+            b_print_opt_details=False,
+        )
+        balance_elapsed = time.time() - start
+        if self.debug:
+            runner.print_step_contacts(step)
+            print(f"check_wrench_balance() time cost: {balance_elapsed}")
+            print(f"balance_metric: {balance_metric}")
+
+        if balance_metric < runner.grasp_ctrl.balance_thres or (
+            self.control_config.stage2_after_full_path and step.index > len(runner.qpos_path)
+        ):
+            self.stage = 2
+        elif self.control_config.free_stage_switch:
+            self.stage = 1
+
+        if self.stage == 1:
+            self.desired_sum_force = max(
+                runner.grasp_ctrl.stage1_force_thres,
+                step.current_sum_force - self.force_increment,
+            )
+        elif self.desired_sum_force_as_traj:
+            self.desired_sum_force = max(step.current_sum_force, self.desired_sum_force) + self.force_increment
+            if self.use_desired_sum_force_ub:
+                self.desired_sum_force = min(
+                    self.desired_sum_force,
+                    self.desired_sum_force_upper,
+                )
+        else:
+            self.desired_sum_force = min(step.current_sum_force, self.final_sum_force) + self.force_increment
+
+        start = time.time()
+        result = runner.grasp_ctrl.ctrl_opt(
+            stage=self.stage,
+            dt=self.action_dt,
+            curr_q_a=step.current_qpos_a,
+            curr_q_f=step.current_qpos_f,
+            target_q_f=step.target_qpos_f,
+            desired_sum_force=self.desired_sum_force,
+            last_dq_a=self.last_delta_qpos_a,
+            ho_contacts=step.contacts,
+            grasp_matrix=grasp_matrix,
+            b_use_arm_motion=self.settings.use_approaching_arm_motion,
+            b_print_opt_details=self.debug,
+        )
+        control_elapsed = time.time() - start
+        self.last_delta_qpos_a = result["dq_a"]
+        return StepControl(
+            result["q_a"],
+            diagnostics={
+                "balance_metric": balance_metric,
+                "t_check_balance": balance_elapsed,
+                "t_ctrl_opt": control_elapsed,
+                "stage": self.stage,
+                "opt_res": result,
+                "desired_sum_force": self.desired_sum_force,
+            },
+        )
+
+
 def run_wrench_control_episode(evaluator, pregrasp_qpos, grasp_qpos, squeeze_qpos, policy):
-    """Run the common optimized controller without changing algorithm weights.
+    """Run the common optimized strategy inside the shared episode lifecycle.
 
     Args:
         evaluator: Initialized :class:`BaseEval` subclass instance.
@@ -28,118 +170,10 @@ def run_wrench_control_episode(evaluator, pregrasp_qpos, grasp_qpos, squeeze_qpo
     Returns:
         None.
     """
-    del pregrasp_qpos  # MuJoCo has already been initialized at this pose.
-    control_config = evaluator.configs.task.control
-    evaluator.desired_sum_force_as_traj = control_config.desired_sum_force_as_traj
-    evaluator.use_desired_sum_force_ub = control_config.use_desired_sum_force_ub
-
-    ctrl_freq = evaluator.ctrl_freq
-    action_dt = evaluator.action_dt
-    sim_step_per_action = evaluator.sim_step_per_action
-    debug = evaluator.configs.task.debug_viewer
-    robot = evaluator.robot
-    grasp_ctrl = evaluator.grasp_ctrl
-
-    current_qpos_f = evaluator.mj_ho.get_qpos_f(names=robot.dof_names)
-    evaluator.mj_ho.ctrl_qpos_a(robot.doa_names, evaluator.robot_adaptor._dof2doa(current_qpos_f))
-    current_qpos_f = evaluator.mj_ho.get_qpos_f(names=robot.dof_names)
-    grasp_qpos_f = evaluator._dof_data2user(grasp_qpos)
-    squeeze_qpos_f = evaluator._dof_data2user(squeeze_qpos)
-    path_approach = grasp_ctrl.interplote_qpos(current_qpos_f, grasp_qpos_f, step=ctrl_freq * 2)
-    path_squeeze = grasp_ctrl.interplote_qpos(grasp_qpos_f, squeeze_qpos_f, step=ctrl_freq * 2)
-    qpos_path = np.concatenate([path_approach, path_squeeze], axis=0)
-
-    final_sum_force = grasp_ctrl.final_sum_force
-    desired_sum_force_upper = final_sum_force + 0.2
-    force_increment = final_sum_force / path_squeeze.shape[0]
-    last_delta_q = np.zeros(robot.n_doa)
-    max_steps = qpos_path.shape[0] * 2
-    stage = 1
-    step = 0
-    waypoint_index = 0
-    # This value is overwritten on every ordinary Stage-1 first step. It only
-    # defines the formerly broken edge case where the first solve enters Stage 2.
-    desired_sum_force = grasp_ctrl.stage1_force_thres
-
-    while step < max_steps:
-        target_qpos_f = qpos_path[waypoint_index]
-        current_qpos_f = evaluator.mj_ho.get_qpos_f(names=robot.dof_names)
-        current_qpos_a = evaluator.mj_ho.get_qpos_a()
-        contacts = evaluator.mj_ho.get_curr_contact_info()
-        object_pose = evaluator.mj_ho.get_obj_pose()
-        contact_forces = np.array([contact["contact_force"][:3] for contact in contacts]).reshape(-1, 3)
-        current_sum_force = np.sum(contact_forces[:, 0])
-        grasp_matrix = grasp_ctrl.compute_grasp_matrix(contacts)
-
-        if step >= qpos_path.shape[0] and current_sum_force > final_sum_force:
-            break
-
-        start = time.time()
-        balance_metric, _ = grasp_ctrl.check_wrench_balance(grasp_matrix, b_print_opt_details=False)
-        balance_elapsed = time.time() - start
-        if debug:
-            print(f"--------------- {step} step ---------------")
-            for contact in contacts:
-                print(
-                    f"{step} step, body1_name: {contact['body1_name']}, "
-                    f"body2_name: {contact['body2_name']}, contact_force: {contact['contact_force']}"
-                )
-            print(f"curr_sum_force: {current_sum_force}")
-            print(f"check_wrench_balance() time cost: {balance_elapsed}")
-            print(f"balance_metric: {balance_metric}")
-
-        if balance_metric < grasp_ctrl.balance_thres or (
-            control_config.stage2_after_full_path and step > qpos_path.shape[0]
-        ):
-            stage = 2
-        elif control_config.free_stage_switch:
-            stage = 1
-
-        if stage == 1:
-            desired_sum_force = max(grasp_ctrl.stage1_force_thres, current_sum_force - force_increment)
-        elif evaluator.desired_sum_force_as_traj:
-            desired_sum_force = max(current_sum_force, desired_sum_force) + force_increment
-            if evaluator.use_desired_sum_force_ub:
-                desired_sum_force = min(desired_sum_force, desired_sum_force_upper)
-        else:
-            desired_sum_force = min(current_sum_force, final_sum_force) + force_increment
-
-        start = time.time()
-        result = grasp_ctrl.ctrl_opt(
-            stage=stage,
-            dt=action_dt,
-            curr_q_a=current_qpos_a,
-            curr_q_f=current_qpos_f,
-            target_q_f=target_qpos_f,
-            desired_sum_force=desired_sum_force,
-            last_dq_a=last_delta_q,
-            ho_contacts=contacts,
-            grasp_matrix=grasp_matrix,
-            b_use_arm_motion=policy.use_approaching_arm_motion,
-            b_print_opt_details=debug,
-        )
-        control_elapsed = time.time() - start
-        last_delta_q = result["dq_a"]
-
-        assert sim_step_per_action % 5 == 0
-        evaluator.mj_ho.ctrl_qpos_a_with_interp(
-            current_qpos_a,
-            result["q_a"],
-            names=robot.doa_names,
-            step_outer=sim_step_per_action // 5,
-            step_inner=5,
-        )
-        step += 1
-        waypoint_index = min(waypoint_index + 1, len(qpos_path) - 1)
-
-        grasp_ctrl.r_data["obj_pose"].append(object_pose)
-        grasp_ctrl.r_data["dof"].append(current_qpos_f)
-        grasp_ctrl.r_data["doa"].append(current_qpos_a)
-        grasp_ctrl.r_data["contacts"].append(contacts)
-        grasp_ctrl.r_data["planned_dof"].append(target_qpos_f)
-        grasp_ctrl.r_data["balance_metric"].append(balance_metric)
-        grasp_ctrl.r_data["t_check_balance"].append(balance_elapsed)
-        grasp_ctrl.r_data["t_ctrl_opt"].append(control_elapsed)
-        grasp_ctrl.r_data["stage"].append(stage)
-        grasp_ctrl.r_data["opt_res"].append(result)
-        grasp_ctrl.r_data["desired_sum_force"].append(desired_sum_force)
+    run_dummy_arm_episode(
+        evaluator,
+        pregrasp_qpos,
+        grasp_qpos,
+        squeeze_qpos,
+        _CoordinatedWrenchPolicy(policy),
+    )

@@ -2,6 +2,13 @@ import warnings
 import numpy as np
 
 from .base import BaseEval
+from .episode_runner import (
+    DummyArmEpisodeRunner,
+    EpisodeStep,
+    StepControl,
+    final_single_contact_force,
+    run_dummy_arm_episode,
+)
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
@@ -14,8 +21,114 @@ Baseline1:
 """
 
 
+class _IndependentForceFeedbackPolicy:
+    """Combine per-joint position and independent contact-force feedback."""
+
+    def initialize(self, runner: DummyArmEpisodeRunner) -> None:
+        """Cache published gains and the fixed arm target.
+
+        Args:
+            runner: Prepared common episode runner.
+
+        Returns:
+            None.
+        """
+        self.debug = runner.evaluator.configs.task.debug_viewer
+        self.arm_ndoa = runner.robot.arm.n_doa
+        self.hand_ndoa = runner.robot.hand.n_doa
+        self.hand_kp_inverse = runner.grasp_ctrl.Kp_inv[-self.hand_ndoa :, -self.hand_ndoa :]
+        self.initial_qpos_a = runner.initial_qpos_a
+        self.final_single_force = final_single_contact_force(runner.robot.name)
+
+    def max_steps(self, runner: DummyArmEpisodeRunner) -> int:
+        """Retain the baseline's 20-percent path overrun.
+
+        Args:
+            runner: Prepared common episode runner.
+
+        Returns:
+            Maximum number of control actions.
+        """
+        return int(len(runner.qpos_path) * 1.2)
+
+    def should_stop(self, runner: DummyArmEpisodeRunner, step: EpisodeStep) -> bool:
+        """Run until the common maximum because BS1 has no early stop.
+
+        Args:
+            runner: Prepared common episode runner.
+            step: Current sampled state.
+
+        Returns:
+            Always ``False``.
+        """
+        del runner, step
+        return False
+
+    def control(self, runner: DummyArmEpisodeRunner, step: EpisodeStep) -> StepControl:
+        """Compute the historical independent position/force command.
+
+        Args:
+            runner: Prepared common episode runner.
+            step: Current sampled state.
+
+        Returns:
+            Full actuator target without extra diagnostics.
+        """
+        if self.debug:
+            runner.print_step_contacts(step)
+
+        current_hand_qpos_a = step.current_qpos_a[-self.hand_ndoa :]
+        target_qpos_a = runner.robot_adaptor._dof2doa(step.target_qpos_f)
+        target_hand_qpos_a = target_qpos_a[-self.hand_ndoa :]
+        hand_qpos_error = (target_hand_qpos_a - current_hand_qpos_a).reshape(-1, 1)
+        joint_weights = np.ones_like(current_hand_qpos_a)
+        position_gain = np.eye(self.hand_ndoa)
+
+        num_contacts = len(step.contacts)
+        if num_contacts:
+            updated_contacts, stacked = runner.grasp_ctrl.Ks(
+                step.current_qpos_a,
+                step.current_qpos_f,
+                step.contacts,
+            )
+            contact_forces = np.concatenate(
+                [contact["contact_force"][:3] for contact in updated_contacts],
+                axis=0,
+            ).reshape(-1, 1)
+            contact_jacobian = stacked["jaco_hf"]
+            target_contact_forces = np.tile(
+                np.array([self.final_single_force, 0, 0]),
+                (num_contacts, 1),
+            ).reshape(-1, 1)
+            contact_force_error = target_contact_forces - contact_forces
+            in_contact_joint_indices = np.any(contact_jacobian != 0, axis=0)
+            joint_weights[in_contact_joint_indices] = 0
+
+        joint_weight_matrix = np.diag(joint_weights)
+        delta_hand_qpos_a = joint_weight_matrix @ position_gain @ hand_qpos_error
+        if num_contacts:
+            force_gain = min(0.8, 1.0 / (len(runner.qpos_path) - step.waypoint_index))
+            force_control_input = force_gain * self.hand_kp_inverse @ contact_jacobian.T @ contact_force_error
+            delta_hand_qpos_a += force_control_input
+            if self.debug:
+                print(f"pos_control_input: {(joint_weight_matrix @ position_gain @ hand_qpos_error).reshape(-1)}")
+                print(f"force_control_input: {force_control_input.reshape(-1)}")
+
+        optimized_hand_qpos_a = current_hand_qpos_a + delta_hand_qpos_a.reshape(-1)
+        optimized_qpos_a = np.concatenate(
+            [self.initial_qpos_a[: self.arm_ndoa], optimized_hand_qpos_a],
+            axis=0,
+        )
+        return StepControl(optimized_qpos_a)
+
+
 class tabletopDummyArmBS1Eval(BaseEval):
     def _initialize(self):
+        """Initialize the BS1 controller.
+
+        Returns:
+            None.
+        """
         self._initialize_controller("bs1")
 
     def damped_pinv(self, J):
@@ -25,112 +138,20 @@ class tabletopDummyArmBS1Eval(BaseEval):
         return J_inv
 
     def _simulate_under_extforce_details(self, pregrasp_qpos, grasp_qpos, squeeze_qpos):
-        # Pre-calculated parameters
-        ctrl_freq = self.ctrl_freq
-        sim_step_per_action = self.sim_step_per_action
-        b_debug = self.configs.task.debug_viewer
-        arm_ndoa = self.robot.arm.n_doa
-        hand_ndoa = self.robot.hand.n_doa
-        Kp_inv = self.grasp_ctrl.Kp_inv[-hand_ndoa:, -hand_ndoa:]
+        """Run BS1 inside the common episode lifecycle.
 
-        # initialize actuated qpos
-        curr_qpos_f = self.mj_ho.get_qpos_f(names=self.robot.dof_names)
-        qpos_a = self.robot_adaptor._dof2doa(curr_qpos_f)
-        self.mj_ho.ctrl_qpos_a(self.robot.doa_names, qpos_a)
-        init_qpos_a = qpos_a.copy()
+        Args:
+            pregrasp_qpos: Initial qpos.
+            grasp_qpos: In-grasp target qpos.
+            squeeze_qpos: Squeezed target qpos.
 
-        # compute full path via interpolation
-        curr_qpos_f = self.mj_ho.get_qpos_f(names=self.robot.dof_names)
-        grasp_qpos_f = self._dof_data2user(grasp_qpos)
-        squeeze_qpos_f = self._dof_data2user(squeeze_qpos)
-        qpos_f_path_1 = self.grasp_ctrl.interplote_qpos(curr_qpos_f, grasp_qpos_f, step=ctrl_freq * 2)
-        qpos_f_path_2 = self.grasp_ctrl.interplote_qpos(grasp_qpos_f, squeeze_qpos_f, step=ctrl_freq * 2)
-        qpos_f_path = np.concatenate([qpos_f_path_1, qpos_f_path_2], axis=0)
-
-        if "shadow" in self.robot.name:
-            final_single_force = 5.0  # slightly larger than F_ub / N_finger to improve the grasp success rate.
-        elif "allegro" in self.robot.name:
-            final_single_force = 3.0
-        elif "leap" in self.robot.name:
-            final_single_force = 2.5
-        else:
-            raise NotImplementedError
-        max_steps = int(qpos_f_path.shape[0] * 1.2)
-        step = 0
-        waypoint_idx = 0
-
-        while step < max_steps:
-            target_qpos_f = qpos_f_path[waypoint_idx]
-            # get state
-            curr_qpos_f = self.mj_ho.get_qpos_f(names=self.robot.dof_names)
-            curr_qpos_a = self.mj_ho.get_qpos_a()
-            ho_contacts = self.mj_ho.get_curr_contact_info()
-            obj_pose = self.mj_ho.get_obj_pose()  # pos + quat(w,x,y,z)
-
-            # compute some variables
-            contact_force_all = np.array([contact["contact_force"][:3] for contact in ho_contacts]).reshape(-1, 3)
-            curr_sum_force = np.sum(contact_force_all[:, 0])
-
-            if b_debug:
-                print(f"--------------- {step} step ---------------")
-                for contact in ho_contacts:
-                    print(
-                        f"{step} step, body1_name: {contact['body1_name']}, body2_name: {contact['body2_name']}, "
-                        + f"contact_force: {contact['contact_force']}"
-                    )
-                print(f"curr_sum_force: {curr_sum_force}")
-
-            # compute qpos error
-            curr_hand_qpos_a = curr_qpos_a[-hand_ndoa:]
-            target_qpos_a = self.robot_adaptor._dof2doa(target_qpos_f)
-            target_hand_qpos_a = target_qpos_a[-hand_ndoa:]
-            hand_qpos_err = (target_hand_qpos_a - curr_hand_qpos_a).reshape(-1, 1)
-            w_q = np.ones_like(curr_hand_qpos_a)
-            gain_q = np.eye(hand_ndoa)
-
-            n_con = len(ho_contacts)
-            if n_con:
-                # obtain in-contact joints and contact force errors
-                updated_contacts, stacked = self.grasp_ctrl.Ks(curr_qpos_a, curr_qpos_f, ho_contacts)
-                contact_force_all = np.concatenate([c["contact_force"][:3] for c in updated_contacts], axis=0).reshape(
-                    -1, 1
-                )
-                contact_jaco_all = stacked["jaco_hf"]
-
-                target_contact_force_all = np.tile(np.array([final_single_force, 0, 0]), (n_con, 1)).reshape(-1, 1)
-                contact_force_err = target_contact_force_all - contact_force_all
-                in_contact_q_indices = np.any(contact_jaco_all != 0, axis=0)
-                w_q[in_contact_q_indices] = 0
-
-            # position control command
-            w_q = np.diag(w_q)
-            delta_hand_q_a = w_q @ gain_q @ hand_qpos_err
-
-            if n_con:
-                # force control command
-                gain_f = min(0.8, 1.0 / (len(qpos_f_path) - waypoint_idx))  # step size
-                force_control_input = gain_f * Kp_inv @ contact_jaco_all.T @ contact_force_err
-
-                delta_hand_q_a += force_control_input
-                if b_debug:
-                    print(f"pos_control_input: {(w_q @ gain_q @ hand_qpos_err).reshape(-1)}")
-                    print(f"force_control_input: {force_control_input.reshape(-1)}")
-
-            opt_hand_q_a = curr_hand_qpos_a + delta_hand_q_a.reshape(-1)
-            opt_q_a = np.concatenate([init_qpos_a[:arm_ndoa], opt_hand_q_a], axis=0)
-
-            assert sim_step_per_action % 5 == 0
-            self.mj_ho.ctrl_qpos_a_with_interp(
-                curr_qpos_a, opt_q_a, names=self.robot.doa_names, step_outer=sim_step_per_action // 5, step_inner=5
-            )
-
-            step += 1  # next step
-            waypoint_idx = min(waypoint_idx + 1, len(qpos_f_path) - 1)
-
-            self.grasp_ctrl.r_data["obj_pose"].append(obj_pose)
-            self.grasp_ctrl.r_data["dof"].append(curr_qpos_f)
-            self.grasp_ctrl.r_data["doa"].append(curr_qpos_a)
-            self.grasp_ctrl.r_data["contacts"].append(ho_contacts)
-            self.grasp_ctrl.r_data["planned_dof"].append(target_qpos_f)
-
-        return
+        Returns:
+            None.
+        """
+        run_dummy_arm_episode(
+            self,
+            pregrasp_qpos,
+            grasp_qpos,
+            squeeze_qpos,
+            _IndependentForceFeedbackPolicy(),
+        )
