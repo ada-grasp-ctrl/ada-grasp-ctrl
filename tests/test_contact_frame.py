@@ -1,15 +1,36 @@
 """Tests for geom-order-independent contact frame and wrench semantics."""
 
+from pathlib import Path
+import tempfile
 import unittest
 
 import mujoco
 import numpy as np
 
-from ada_grasp_ctrl.utils.hand_util import canonicalize_contact_frame_wrench
+from ada_grasp_ctrl.utils.hand_util import canonicalize_contact_frame_wrench, collision_mesh_paths
 
 
 class ContactCanonicalizationTest(unittest.TestCase):
     """Verify pure and native MuJoCo canonical contact invariants."""
+
+    def test_collision_mesh_order_is_independent_of_file_creation_order(self):
+        """Sort collision meshes before their order can affect MuJoCo geom IDs."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            observed_orders = []
+            for directory_name, creation_order in (
+                ("forward", ("convex_piece_000.obj", "convex_piece_001.obj")),
+                ("reverse", ("convex_piece_001.obj", "convex_piece_000.obj")),
+            ):
+                object_root = root / directory_name
+                mesh_root = object_root / "urdf" / "meshes"
+                mesh_root.mkdir(parents=True)
+                for filename in creation_order:
+                    (mesh_root / filename).touch()
+                observed_orders.append([path.name for path in collision_mesh_paths(object_root)])
+
+        expected = ["convex_piece_000.obj", "convex_piece_001.obj"]
+        self.assertEqual(observed_orders, [expected, expected])
 
     def test_pure_transform_preserves_arbitrary_world_wrench(self):
         """Canonicalize equivalent orderings with all six wrench entries nonzero."""

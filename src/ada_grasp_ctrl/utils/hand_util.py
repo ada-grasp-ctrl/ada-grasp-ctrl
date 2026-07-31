@@ -1,5 +1,6 @@
 import os
 import copy
+from pathlib import Path
 
 import trimesh
 import numpy as np
@@ -12,6 +13,23 @@ from .rot_util import interplote_pose, interplote_qpos
 
 
 _CONTACT_ORDER_SWAP = np.diag([-1.0, 1.0, -1.0])
+
+
+def collision_mesh_paths(object_path):
+    """Return collision meshes in a stable geom-declaration order.
+
+    Filesystem directory iteration order varies across copies of the same
+    object asset. MuJoCo geom IDs and contact ordering depend on declaration
+    order, so sorting here is required for path-independent trajectories.
+
+    Args:
+        object_path: Root directory of one processed object asset.
+
+    Returns:
+        Collision mesh paths ordered lexicographically by filename.
+    """
+    mesh_directory = Path(object_path) / "urdf" / "meshes"
+    return sorted(mesh_directory.glob("convex_piece_*.obj"), key=lambda path: path.name)
 
 
 def canonicalize_contact_frame_wrench(
@@ -242,15 +260,13 @@ class MjHO:
 
         obj_body = self.spec.worldbody.add_body(name="object")
         obj_body.add_freejoint(name="obj_freejoint")
-        parts_folder = os.path.join(obj_path, "urdf/meshes")
-        for file in os.listdir(parts_folder):
-            file_path = os.path.join(parts_folder, file)
-            mesh_name = file.replace(".obj", "")
+        for file_path in collision_mesh_paths(obj_path):
+            mesh_name = file_path.stem
             mesh_id = mesh_name.replace("convex_piece_", "")
 
             self.spec.add_mesh(
                 name=mesh_name,
-                file=file_path,
+                file=str(file_path),
                 scale=[obj_scale, obj_scale, obj_scale],
             )
             obj_body.add_geom(
