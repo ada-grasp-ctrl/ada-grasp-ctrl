@@ -117,7 +117,16 @@ def compare_directories(baseline_root: Path, current_root: Path) -> list[str]:
         Mismatch descriptions; an empty list means acceptance.
     """
     failures = []
+    if not baseline_root.is_dir():
+        failures.append(f"Baseline root is not a directory: {baseline_root}")
+        return failures
+    if not current_root.is_dir():
+        failures.append(f"Current root is not a directory: {current_root}")
+        return failures
     baseline_paths = sorted(baseline_root.rglob("*.npy"))
+    if not baseline_paths:
+        failures.append(f"Baseline contains no .npy files: {baseline_root}")
+        return failures
     for baseline_path in baseline_paths:
         relative = baseline_path.relative_to(baseline_root)
         current_path = current_root / relative

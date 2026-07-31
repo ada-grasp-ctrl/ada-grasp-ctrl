@@ -100,6 +100,20 @@ class GoldenComparisonTest(unittest.TestCase):
         self.assertEqual(persisted["rtol"], 1e-5)
         self.assertEqual(persisted["atol"], 1e-6)
 
+    def test_empty_or_non_directory_baseline_cannot_pass(self):
+        """Reject zero-file and accidental single-file comparisons."""
+        empty_failures = compare_directories(self.baseline_root, self.current_root)
+        self.assertEqual(len(empty_failures), 1)
+        self.assertIn("contains no .npy files", empty_failures[0])
+
+        baseline_file = self.root / "baseline.npy"
+        current_file = self.root / "current.npy"
+        np.save(baseline_file, {"value": np.zeros(1)})
+        np.save(current_file, {"value": np.zeros(1)})
+        file_failures = compare_directories(baseline_file, current_file)
+        self.assertEqual(len(file_failures), 1)
+        self.assertIn("not a directory", file_failures[0])
+
 
 if __name__ == "__main__":
     unittest.main()
