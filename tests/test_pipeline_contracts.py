@@ -1,0 +1,298 @@
+"""Unit tests for schemas, converters, paths, reports, and empty statistics."""
+
+import json
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import unittest
+
+import numpy as np
+from omegaconf import OmegaConf
+import yaml
+
+from ada_grasp_ctrl.batch import (
+    SampleResult,
+    SampleStatus,
+    choose_inputs,
+    raise_for_batch_failures,
+    write_batch_report,
+)
+from ada_grasp_ctrl.errors import BatchExecutionError
+from ada_grasp_ctrl.runtime import resolve_worker_count, seed_everything
+from ada_grasp_ctrl.schema import SchemaError, load_npy_record, validate_grasp_record
+from ada_grasp_ctrl.tasks import TASK_REGISTRY
+from ada_grasp_ctrl.tasks.control_eval import METHOD_REGISTRY
+from ada_grasp_ctrl.tasks.control_stat import get_control_results
+from ada_grasp_ctrl.tasks.convert_format import Batched, Learning
+
+
+class PipelineContractTest(unittest.TestCase):
+    """Exercise the public data and task orchestration contracts."""
+
+    def setUp(self):
+        """Create an isolated filesystem root for each test.
+
+        Returns:
+            None.
+        """
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+
+    def tearDown(self):
+        """Release the isolated filesystem root.
+
+        Returns:
+            None.
+        """
+        self.temporary.cleanup()
+
+    def _scene_path(self):
+        """Write a minimal valid object scene record.
+
+        Returns:
+            Scene ``.npy`` path.
+        """
+        scene_path = self.root / "scene.npy"
+        object_mesh = self.root / "object" / "meshes" / "object.obj"
+        scene = {
+            "task": {"obj_name": "target"},
+            "scene": {
+                "target": {
+                    "file_path": str(object_mesh),
+                    "pose": np.array([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]),
+                    "scale": [1.0],
+                }
+            },
+        }
+        np.save(scene_path, scene)
+        return scene_path
+
+    def _converter_config(self):
+        """Build the converter configuration fields used by direct unit calls.
+
+        Returns:
+            OmegaConf configuration.
+        """
+        return OmegaConf.create(
+            {
+                "task": {"data_path": str(self.root / "raw")},
+                "grasp_dir": str(self.root / "formatted"),
+                "hand_name": "shadow",
+                "hand": {"mocap": True},
+            }
+        )
+
+    def _run_cli(self, *overrides: str) -> subprocess.CompletedProcess[str]:
+        """Run the source-checkout CLI and capture its public process contract.
+
+        Args:
+            overrides: Hydra overrides appended to the command line.
+
+        Returns:
+            Completed subprocess with captured text output.
+        """
+        project_root = Path(__file__).resolve().parents[1]
+        return subprocess.run(
+            [sys.executable, str(project_root / "src" / "main.py"), *overrides],
+            cwd=project_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def test_learning_and_batched_write_v1_without_nested_batch_paths(self):
+        """Convert fixtures and prove Batched outputs remain siblings."""
+        scene_path = self._scene_path()
+        raw_root = self.root / "raw"
+        raw_root.mkdir()
+        qpos = np.array([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.2])
+        learning_path = raw_root / "learning.npy"
+        np.save(
+            learning_path,
+            {
+                "scene_path": str(scene_path),
+                "pregrasp_qpos": qpos,
+                "grasp_qpos": qpos,
+                "squeeze_qpos": qpos,
+            },
+        )
+        learning_outputs = Learning((str(learning_path), self._converter_config()))
+        learning = load_npy_record(learning_outputs[0])
+        self.assertEqual(learning["schema_version"], 1)
+        validate_grasp_record(learning, learning_outputs[0])
+
+        batched_path = raw_root / "batch.npy"
+        np.save(
+            batched_path,
+            {
+                "scene_path": str(scene_path),
+                "pregrasp_qpos": np.stack([qpos, qpos]),
+                "grasp_qpos": np.stack([qpos, qpos]),
+                "squeeze_qpos": np.stack([qpos, qpos]),
+                "scene_scale": np.array([0.5, 1.5]),
+            },
+        )
+        batched_outputs = [Path(path) for path in Batched((str(batched_path), self._converter_config()))]
+        self.assertEqual(
+            [path.relative_to(self.root / "formatted") for path in batched_outputs],
+            [
+                Path("batch/0.npy"),
+                Path("batch/1.npy"),
+            ],
+        )
+        self.assertEqual(load_npy_record(batched_outputs[0])["obj_scale"], 0.5)
+        self.assertEqual(load_npy_record(batched_outputs[1])["obj_scale"], 1.5)
+
+    def test_schema_error_names_sample_field_expected_and_actual(self):
+        """Return actionable context for a malformed grasp field."""
+        invalid = {
+            "obj_path": "missing",
+            "obj_pose": np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
+            "obj_scale": 1.0,
+            "pregrasp_qpos": np.zeros(2),
+            "grasp_qpos": np.zeros(2),
+            "squeeze_qpos": np.zeros(2),
+        }
+        with self.assertRaises(SchemaError) as context:
+            validate_grasp_record(invalid, "broken.npy")
+        message = str(context.exception)
+        self.assertIn("broken.npy", message)
+        self.assertIn("obj_pose", message)
+        self.assertIn("expected", message)
+        self.assertIn("actual", message)
+
+    def test_deterministic_skip_report_and_failure_exit(self):
+        """Select deterministically, write both reports, and raise only after writing."""
+        existing = self.root / "existing.npy"
+        existing.touch()
+        selected, skipped = choose_inputs(
+            ["b.npy", "a.npy", "c.npy"],
+            skip=True,
+            output_paths=[[str(existing)], [str(self.root / "a.out")], [str(self.root / "c.out")]],
+            max_num=1,
+            seed=12,
+        )
+        self.assertEqual(skipped, 1)
+        self.assertEqual(len(selected), 1)
+        results = [
+            SampleResult("a.npy", SampleStatus.COMPLETED, output_paths=["a.out"]),
+            SampleResult("c.npy", SampleStatus.SOLVER_DEGRADED, message="held"),
+        ]
+        summary = write_batch_report(
+            self.root / "report",
+            "control_eval",
+            results,
+            num_discovered=3,
+            num_skipped=1,
+        )
+        self.assertEqual(summary["num_solver_degraded"], 1)
+        self.assertTrue((self.root / "report" / "failures.jsonl").is_file())
+        with self.assertRaises(BatchExecutionError):
+            raise_for_batch_failures(summary)
+        parsed = json.loads((self.root / "report" / "run_report.json").read_text())
+        self.assertEqual(parsed["num_processed"], 2)
+
+    def test_empty_statistics_are_null_and_have_zero_denominator(self):
+        """Save defined integer counts and YAML null instead of division warnings/NaN."""
+        configs = OmegaConf.create(
+            {
+                "control_dir": str(self.root / "control"),
+                "hand_name": "dummy_arm_shadow",
+                "task": {
+                    "method": "ours",
+                    "ablation_name": "default",
+                    "setting_name": "dist_0",
+                    "lift_height": 0.2,
+                    "n_terminal_steps": 5,
+                },
+            }
+        )
+        statistics, results, output_path = get_control_results([], configs)
+        self.assertEqual(results, [])
+        self.assertIsNone(statistics["success_rate"])
+        self.assertIsNone(statistics["ave_obj_pos_err"]["mean"])
+        self.assertEqual(statistics["success_rate_denominator"], 0)
+        saved = yaml.safe_load(output_path.read_text())
+        self.assertIsNone(saved["success_rate"])
+        self.assertNotIn("nan", output_path.read_text().lower())
+
+    def test_registries_workers_and_seed_are_explicit_and_reproducible(self):
+        """Expose only public tasks/methods and reproduce NumPy samples."""
+        self.assertEqual(
+            set(TASK_REGISTRY),
+            {"format", "dummy_arm_qpos", "control_eval", "control_stat"},
+        )
+        self.assertEqual(
+            {method for setting, method in METHOD_REGISTRY if setting == "tabletop"},
+            {"ours", "op", "bs1", "bs2", "bs3"},
+        )
+        self.assertGreaterEqual(resolve_worker_count("auto"), 1)
+        with self.assertRaisesRegex(Exception, "greater than zero"):
+            resolve_worker_count(0)
+        seed_everything(42)
+        first = np.random.rand(4)
+        seed_everything(42)
+        np.testing.assert_array_equal(first, np.random.rand(4))
+
+    def test_cli_preserves_exit_codes_without_hydra_tracebacks(self):
+        """Prove successful, batch-failure, and preflight exit semantics in subprocesses."""
+        empty_root = self.root / "empty"
+        successful = self._run_cli(
+            "task=control_stat",
+            "hand=dummy_arm_shadow",
+            "n_worker=1",
+            f"save_dir={empty_root}",
+            f"control_dir={empty_root / 'control'}",
+            f"log_dir={empty_root / 'log'}",
+        )
+
+        damaged_root = self.root / "damaged"
+        raw_root = damaged_root / "raw"
+        raw_root.mkdir(parents=True)
+        (raw_root / "broken.npy").write_bytes(b"not a NumPy file")
+        batch_failure = self._run_cli(
+            "task=format",
+            "hand=shadow",
+            "task.data_name=Learning",
+            f"task.data_path={raw_root}",
+            "n_worker=1",
+            f"save_dir={damaged_root}",
+            f"grasp_dir={damaged_root / 'grasp'}",
+            f"log_dir={damaged_root / 'log'}",
+        )
+
+        invalid_root = self.root / "invalid"
+        preflight_failure = self._run_cli(
+            "task=control_stat",
+            "hand=dummy_arm_shadow",
+            "task_name=unsupported",
+            "n_worker=1",
+            f"save_dir={invalid_root}",
+            f"control_dir={invalid_root / 'control'}",
+            f"log_dir={invalid_root / 'log'}",
+        )
+
+        missing_asset_root = self.root / "missing_asset"
+        project_root = Path(__file__).resolve().parents[1]
+        missing_asset = self._run_cli(
+            "task=control_eval",
+            "hand=dummy_arm_shadow",
+            "n_worker=1",
+            f"hand.xml_path={missing_asset_root / 'missing.xml'}",
+            f"grasp_dir={project_root / 'examples' / 'data' / 'shadow' / 'dummy_arm'}",
+            f"control_dir={missing_asset_root / 'control'}",
+            f"save_dir={missing_asset_root}",
+            f"log_dir={missing_asset_root / 'log'}",
+        )
+
+        self.assertEqual(successful.returncode, 0, successful.stderr)
+        self.assertEqual(batch_failure.returncode, 1, batch_failure.stderr)
+        self.assertEqual(preflight_failure.returncode, 2, preflight_failure.stderr)
+        self.assertEqual(missing_asset.returncode, 2, missing_asset.stderr)
+        for process in (successful, batch_failure, preflight_failure, missing_asset):
+            self.assertNotIn("Traceback", process.stdout + process.stderr)
+
+
+if __name__ == "__main__":
+    unittest.main()
