@@ -1,3 +1,9 @@
 [submodule "third_party/mujoco_menagerie"]
 	path = third_party/mujoco_menagerie
-	url = git@github.com:google-deepmind/mujoco_menagerie.git
+	url = https://github.com/google-deepmind/mujoco_menagerie.git
+[submodule "third_party/pytorch_kinematics"]
+	path = third_party/pytorch_kinematics
+	url = https://github.com/DexGrasp-TH/pytorch_kinematics.git
+[submodule "third_party/utils_python"]
+	path = third_party/utils_python
+	url = https://github.com/Mingrui-Yu/utils_python.git

@@ -6,14 +6,18 @@ __pycache__/
 __pycache__/
 **/__pycache__/
 *.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.coverage
 
 output/*
 !output/learn_shadow
 !output/learn_allegro
 !output/learn_leap_tac3d
+output/learn_*/log/
 
 assets/object
 debug*
-
-third_party/pytorch_kinematics
-third_party/utils_python
