@@ -1,5 +1,4 @@
 import time
-import warnings
 import numpy as np
 
 from .base import BaseEval
@@ -10,8 +9,6 @@ from .episode_runner import (
     final_single_contact_force,
     run_dummy_arm_episode,
 )
-
-warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 """
 Baseline2:

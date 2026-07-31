@@ -3,6 +3,7 @@
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
+import warnings
 
 import numpy as np
 
@@ -11,6 +12,7 @@ from ada_grasp_ctrl.optimization import (
     friction_cone_jacobian,
     friction_cone_slack,
     select_control_solution,
+    solve_linear_system,
 )
 from ada_grasp_ctrl.utils.grasp_controller import GraspController, _ControlProblemContext
 
@@ -41,6 +43,39 @@ class OptimizationHelperTest(unittest.TestCase):
         """Use the symmetric subgradient at the cone tip without losing d/d fx."""
         gradient = friction_cone_jacobian(np.zeros((1, 3)), 0.6)
         np.testing.assert_array_equal(gradient, np.array([[0.6, 0.0, 0.0]]))
+
+    def test_linear_system_uses_direct_solve_when_well_conditioned(self):
+        """Return the exact multi-RHS solution without a degradation marker."""
+        matrix = np.array([[3.0, 1.0], [1.0, 2.0]])
+        rhs = np.array([[1.0, 0.0], [0.0, 1.0]])
+        solution, diagnostics = solve_linear_system(matrix, rhs)
+        np.testing.assert_allclose(matrix @ solution, rhs, rtol=1e-12, atol=1e-12)
+        self.assertTrue(diagnostics["accepted"])
+        self.assertEqual(diagnostics["method"], "solve")
+
+    def test_singular_linear_system_uses_diagnosed_least_squares_fallback(self):
+        """Keep a finite minimum-norm result and expose numerical degradation."""
+        matrix = np.array([[1.0, 1.0], [2.0, 2.0]])
+        rhs = np.array([1.0, 2.0])
+        solution, diagnostics = solve_linear_system(matrix, rhs)
+        np.testing.assert_allclose(matrix @ solution, rhs, rtol=1e-12, atol=1e-12)
+        self.assertFalse(diagnostics["accepted"])
+        self.assertTrue(diagnostics["success"])
+        self.assertEqual(diagnostics["method"], "lstsq")
+        self.assertGreater(diagnostics["condition_number"], diagnostics["condition_limit"])
+
+    def test_failed_linear_fallback_returns_finite_zero_solution(self):
+        """Prevent nonfinite control data when both direct and fallback solves fail."""
+        matrix = np.array([[1.0, 1.0], [2.0, 2.0]])
+        rhs = np.array([1.0, 2.0])
+        with patch(
+            "ada_grasp_ctrl.optimization.np.linalg.lstsq",
+            side_effect=np.linalg.LinAlgError("test failure"),
+        ):
+            solution, diagnostics = solve_linear_system(matrix, rhs)
+        np.testing.assert_array_equal(solution, np.zeros(2))
+        self.assertFalse(diagnostics["accepted"])
+        self.assertEqual(diagnostics["method"], "zero")
 
     @staticmethod
     def _result(x, *, success=True, fun=1.0, status=0):
@@ -260,25 +295,49 @@ class SharedControlProblemTest(unittest.TestCase):
             message="iteration limit",
             nit=200,
         )
-        with patch("ada_grasp_ctrl.utils.grasp_controller.minimize", return_value=failed):
-            result = controller._solve_control_problem(
-                solver_name="test",
-                stage=2,
-                objective=lambda x: float(x @ x),
-                jacobian=lambda x: 2 * x,
-                constraints=[],
-                bounds=[(-1.0, 1.0)] * 2 + [(0.0, 10.0)] * 3,
-                initial_variables=np.zeros(5),
-                joint_limit_constraint=lambda x: np.ones(4),
-                current_qpos_a=np.array([0.2, -0.4]),
-                current_contact_forces=np.array([1.0, 0.1, -0.2]),
-                num_dof=2,
-                print_details=False,
+
+        def clipped_minimize(**kwargs):
+            """Emit SciPy's documented clipping warning and return a failure.
+
+            Args:
+                kwargs: Minimize arguments, unused by the deterministic fixture.
+
+            Returns:
+                Failed SciPy-like result.
+            """
+            del kwargs
+            warnings.warn(
+                "Values in x were outside bounds during a minimize step, clipping to bounds",
+                RuntimeWarning,
+                stacklevel=2,
             )
+            warnings.warn("unexpected optimizer warning", UserWarning, stacklevel=2)
+            return failed
+
+        with warnings.catch_warnings(record=True) as observed_warnings:
+            warnings.simplefilter("always")
+            with patch("ada_grasp_ctrl.utils.grasp_controller.minimize", side_effect=clipped_minimize):
+                result = controller._solve_control_problem(
+                    solver_name="test",
+                    stage=2,
+                    objective=lambda x: float(x @ x),
+                    jacobian=lambda x: 2 * x,
+                    constraints=[],
+                    bounds=[(-1.0, 1.0)] * 2 + [(0.0, 10.0)] * 3,
+                    initial_variables=np.zeros(5),
+                    joint_limit_constraint=lambda x: np.ones(4),
+                    current_qpos_a=np.array([0.2, -0.4]),
+                    current_contact_forces=np.array([1.0, 0.1, -0.2]),
+                    num_dof=2,
+                    print_details=False,
+                )
         np.testing.assert_array_equal(result["q_a"], np.array([0.2, -0.4]))
         np.testing.assert_array_equal(result["dq_a"], np.zeros(2))
         np.testing.assert_array_equal(result["cf"], np.array([1.0, 0.1, -0.2]))
         self.assertTrue(controller.solver_degraded)
+        self.assertEqual(len(observed_warnings), 1)
+        self.assertEqual(str(observed_warnings[0].message), "unexpected optimizer warning")
+        self.assertEqual(controller.r_data["solver_diagnostics"][-1]["bound_clipping_warning_count"], 1)
 
 
 if __name__ == "__main__":

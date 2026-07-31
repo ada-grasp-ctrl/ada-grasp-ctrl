@@ -8,6 +8,96 @@ from typing import Any
 import numpy as np
 
 
+def solve_linear_system(
+    matrix: np.ndarray,
+    right_hand_side: np.ndarray,
+    *,
+    condition_limit: float = 1e12,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    """Solve a square system with condition diagnostics and a safe fallback.
+
+    A well-conditioned system uses :func:`numpy.linalg.solve`. Singular or
+    ill-conditioned systems use the minimum-norm least-squares solution and
+    are explicitly marked degraded. If even that fallback is nonfinite or
+    fails, a zero solution is returned so invalid values cannot reach control.
+
+    Args:
+        matrix: Square coefficient matrix ``A``.
+        right_hand_side: Vector or matrix ``B`` in ``A @ X = B``.
+        condition_limit: Largest condition number accepted for direct solve.
+
+    Returns:
+        Solution and a JSON/NumPy-serializable diagnostic dictionary.
+
+    Raises:
+        ValueError: If shapes are incompatible or ``condition_limit`` is invalid.
+    """
+    coefficients = np.asarray(matrix)
+    rhs = np.asarray(right_hand_side)
+    if coefficients.ndim != 2 or coefficients.shape[0] != coefficients.shape[1]:
+        raise ValueError(f"matrix must be square, got shape {coefficients.shape}")
+    if rhs.ndim not in {1, 2} or rhs.shape[0] != coefficients.shape[0]:
+        raise ValueError(
+            "right_hand_side must be a vector or matrix with leading dimension "
+            f"{coefficients.shape[0]}, got shape {rhs.shape}"
+        )
+    if not np.isfinite(condition_limit) or condition_limit <= 0:
+        raise ValueError(f"condition_limit must be positive and finite, got {condition_limit}")
+
+    try:
+        condition_number = float(np.linalg.cond(coefficients))
+    except np.linalg.LinAlgError:
+        condition_number = np.inf
+
+    method = "solve"
+    message = "direct solve accepted"
+    degraded = not np.isfinite(condition_number) or condition_number > condition_limit
+    solution = None
+    if not degraded:
+        try:
+            solution = np.linalg.solve(coefficients, rhs)
+            if not np.all(np.isfinite(solution)):
+                degraded = True
+                message = "direct solve returned nonfinite values"
+        except np.linalg.LinAlgError as error:
+            degraded = True
+            message = f"direct solve failed: {error}"
+    else:
+        message = f"condition number {condition_number:.6g} exceeds limit {condition_limit:.6g}"
+
+    fallback_failed = False
+    if degraded:
+        method = "lstsq"
+        try:
+            solution = np.linalg.lstsq(coefficients, rhs, rcond=None)[0]
+            if not np.all(np.isfinite(solution)):
+                fallback_failed = True
+                message = f"{message}; least-squares fallback returned nonfinite values"
+        except np.linalg.LinAlgError as error:
+            fallback_failed = True
+            message = f"{message}; least-squares fallback failed: {error}"
+        if fallback_failed:
+            method = "zero"
+            solution_shape = rhs.shape
+            solution = np.zeros(solution_shape, dtype=np.result_type(coefficients, rhs, float))
+
+    residual_norm = float(np.linalg.norm(coefficients @ solution - rhs))
+    finite = bool(np.all(np.isfinite(solution)) and np.isfinite(residual_norm))
+    diagnostics = {
+        "accepted": bool(not degraded and finite),
+        "success": finite,
+        "method": method,
+        "message": message,
+        "condition_number": (condition_number if np.isfinite(condition_number) else None),
+        "condition_limit": float(condition_limit),
+        "residual_norm": (residual_norm if np.isfinite(residual_norm) else None),
+        "finite": finite,
+        "matrix_shape": tuple(int(value) for value in coefficients.shape),
+        "rhs_shape": tuple(int(value) for value in rhs.shape),
+    }
+    return solution, diagnostics
+
+
 def friction_cone_slack(contact_forces: np.ndarray, friction_coefficient: float) -> np.ndarray:
     """Evaluate circular Coulomb friction-cone slack.
 

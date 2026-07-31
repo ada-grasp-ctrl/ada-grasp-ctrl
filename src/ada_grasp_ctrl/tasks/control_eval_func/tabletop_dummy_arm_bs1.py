@@ -1,4 +1,3 @@
-import warnings
 import numpy as np
 
 from .base import BaseEval
@@ -9,8 +8,6 @@ from .episode_runner import (
     final_single_contact_force,
     run_dummy_arm_episode,
 )
-
-warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 """
 Baseline1:
@@ -130,12 +127,6 @@ class tabletopDummyArmBS1Eval(BaseEval):
             None.
         """
         self._initialize_controller("bs1")
-
-    def damped_pinv(self, J):
-        lambd = 1.0
-        I_mat = np.eye(J.shape[0])
-        J_inv = J.T @ np.linalg.inv(J @ J.T + lambd**2 * I_mat)
-        return J_inv
 
     def _simulate_under_extforce_details(self, pregrasp_qpos, grasp_qpos, squeeze_qpos):
         """Run BS1 inside the common episode lifecycle.

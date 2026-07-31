@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, TYPE_CHECKING
+import warnings
 
 from scipy.optimize import minimize
 from scipy.linalg import block_diag
@@ -24,7 +25,11 @@ from ada_grasp_ctrl.optimization import (
     friction_cone_jacobian,
     friction_cone_slack,
     select_control_solution,
+    solve_linear_system,
 )
+
+
+_SLSQP_BOUND_CLIPPING_WARNING = "Values in x were outside bounds during a minimize step, clipping to bounds"
 
 
 @dataclass(frozen=True)
@@ -99,7 +104,11 @@ class GraspController:
             self.stage1_force_thres = configs.stage1_force_thres
 
             self.Kp = np.diag(np.clip(self.robot.doa_kp, 0, 1e3))
-            self.Kp_inv = np.linalg.inv(self.Kp)
+            self.Kp_inv = self._solve_linear_system(
+                self.Kp,
+                np.eye(self.Kp.shape[0]),
+                system_name="joint_stiffness_inverse",
+            )
             self.Ke = np.diag([self.Ke_scalar, self.Ke_scalar, self.Ke_scalar])  # x-axis is the contact normal
 
             self.tan_motion_pen_weight = configs.tan_motion_pen_weight
@@ -156,6 +165,28 @@ class GraspController:
     def interplote_qpos(self, qpos1: np.array, qpos2: np.array, step: int) -> np.array:
         return np.linspace(qpos1, qpos2, step + 1)[1:]
 
+    def _solve_linear_system(
+        self,
+        matrix: np.ndarray,
+        right_hand_side: np.ndarray,
+        *,
+        system_name: str,
+    ) -> np.ndarray:
+        """Solve a controller system and record any numerical degradation.
+
+        Args:
+            matrix: Square coefficient matrix.
+            right_hand_side: Vector or matrix on the right side of the system.
+            system_name: Stable diagnostic identifier for this physical system.
+
+        Returns:
+            Direct or safely degraded solution.
+        """
+        solution, diagnostics = solve_linear_system(matrix, right_hand_side)
+        if not diagnostics["accepted"]:
+            self._record_solver_diagnostic(f"linear:{system_name}", diagnostics)
+        return solution
+
     def Ks(self, q_a, q_f, contacts):
         """
         Compute Ks.
@@ -202,24 +233,40 @@ class GraspController:
             J_a_stack = np.concatenate([c["jaco_a"] for c in contacts], axis=0)
             J_f_stack = np.concatenate([c["jaco_f"] for c in contacts], axis=0)
             Kr_inv_stack = J_a_stack @ self.Kp_inv @ J_f_stack.T
-            Ks_stack = np.linalg.inv(I_stack + Ke_stack @ Kr_inv_stack) @ Ke_stack
+            Ks_stack = self._solve_linear_system(
+                I_stack + Ke_stack @ Kr_inv_stack,
+                Ke_stack,
+                system_name="multi_contact_stiffness",
+            )
 
             J_ha_stack = np.concatenate([c["jaco_ha"] for c in contacts], axis=0)
             J_hf_stack = np.concatenate([c["jaco_hf"] for c in contacts], axis=0)
             Kr_h_inv_stack = J_ha_stack @ self.Kp_inv[-hand_ndoa:, -hand_ndoa:] @ J_hf_stack.T
-            Ks_h_stack = np.linalg.inv(I_stack + Ke_stack @ Kr_h_inv_stack) @ Ke_stack
+            Ks_h_stack = self._solve_linear_system(
+                I_stack + Ke_stack @ Kr_h_inv_stack,
+                Ke_stack,
+                system_name="multi_contact_hand_stiffness",
+            )
         else:
             for i, contact in enumerate(contacts):
                 contact_jaco_a = contact["jaco_a"]
                 contact_jaco_f = contact["jaco_f"]
                 Kr_inv = contact_jaco_a @ self.Kp_inv @ contact_jaco_f.T
-                Ks = np.linalg.inv(I3 + self.Ke @ Kr_inv) @ self.Ke  # in contact local frame
+                Ks = self._solve_linear_system(
+                    I3 + self.Ke @ Kr_inv,
+                    self.Ke,
+                    system_name="contact_stiffness",
+                )
                 contact["Ks"] = Ks
                 # only hand
                 contact_jaco_ha = contact_jaco_a[:, -hand_ndoa:]
                 contact_jaco_hf = contact_jaco_f[:, -hand_ndoa:]
                 Kr_h_inv = contact_jaco_ha @ self.Kp_inv[-hand_ndoa:, -hand_ndoa:] @ contact_jaco_hf.T
-                Ks_h = np.linalg.inv(I3 + self.Ke @ Kr_h_inv) @ self.Ke  # in contact local frame
+                Ks_h = self._solve_linear_system(
+                    I3 + self.Ke @ Kr_h_inv,
+                    self.Ke,
+                    system_name="contact_hand_stiffness",
+                )
                 contact["Ks_h"] = Ks_h
                 contacts[i] = contact
 
@@ -494,21 +541,40 @@ class GraspController:
         Returns:
             Accepted or safely held actuator, delta, and contact-force vectors.
         """
-        result = minimize(
-            fun=objective,
-            jac=jacobian,
-            constraints=constraints,
-            x0=initial_variables,
-            bounds=bounds,
-            method="SLSQP",
-            options={"ftol": 1e-6, "disp": print_details, "maxiter": 200},
-        )
+        with warnings.catch_warnings(record=True) as caught_warnings:
+            warnings.simplefilter("always")
+            result = minimize(
+                fun=objective,
+                jac=jacobian,
+                constraints=constraints,
+                x0=initial_variables,
+                bounds=bounds,
+                method="SLSQP",
+                options={"ftol": 1e-6, "disp": print_details, "maxiter": 200},
+            )
+        bound_clipping_warning_count = 0
+        for warning_message in caught_warnings:
+            if (
+                issubclass(warning_message.category, RuntimeWarning)
+                and str(warning_message.message) == _SLSQP_BOUND_CLIPPING_WARNING
+            ):
+                bound_clipping_warning_count += 1
+                continue
+            # Only the documented SLSQP trial-step clipping warning is handled
+            # locally. Every unrelated warning remains visible to callers.
+            warnings.warn_explicit(
+                warning_message.message,
+                warning_message.category,
+                warning_message.filename,
+                warning_message.lineno,
+            )
         diagnostics = diagnose_slsqp_result(
             result,
             constraints,
             bounds,
             joint_limit_constraint=joint_limit_constraint,
         )
+        diagnostics["bound_clipping_warning_count"] = bound_clipping_warning_count
         self._record_solver_diagnostic(solver_name, diagnostics, stage=stage)
         qpos_a, delta_qpos_a, contact_forces = select_control_solution(
             current_qpos_a,
