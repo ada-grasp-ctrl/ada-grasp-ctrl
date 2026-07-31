@@ -1,0 +1,26 @@
+skip: false
+seed: 12
+n_worker: auto
+setting: tabletop
+
+exp_name: debug
+save_root: output
+asset_root: assets
+data_root: .
+save_dir: ${save_root}/${exp_name}_${hand_name}
+grasp_dir: ${save_dir}/graspdata
+dummy_arm_grasp_dir: ${save_root}/${exp_name}_dummy_arm_${hand_name}/graspdata
+control_dir: ${save_dir}/control
+log_dir: ${save_dir}/log/${task_name}/${now:%Y_%m_%d_%H_%M_%S}
+
+defaults:
+  - _self_
+  - task: control_stat
+  - hand: shadow
+
+task_name: ${hydra:runtime.choices.task}
+hand_name: ${hydra:runtime.choices.hand}
+
+hydra:
+  run:
+    dir: ${log_dir}

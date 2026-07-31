@@ -1,0 +1,21 @@
+name: ada-grasp-ctrl
+
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+  - nodefaults
+
+dependencies:
+  - python=3.10.20
+  - pip=26.0.1
+  - setuptools=82.0.1
+  - wheel=0.46.3
+  - pytorch=2.2.2
+  - pytorch-cuda=12.1
+  - cuda-version=12.1
+  - pinocchio=3.0.0
+  - pip:
+      - -e ./third_party/pytorch_kinematics
+      - -e ./third_party/utils_python
+      - -e .

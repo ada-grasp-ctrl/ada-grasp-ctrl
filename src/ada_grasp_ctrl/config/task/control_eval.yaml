@@ -1,0 +1,53 @@
+max_num: -1
+obj_mass: 0.1   # unit: kg
+miu_coef: [0.6, 0.02]
+debug_render: false
+debug_viewer: false
+debug_viewer_backend: mujoco # mujoco or mjviser
+mjviser:
+  host: 127.0.0.1
+  port: 8080
+debug_dir: ${save_dir}/debug
+
+simulation_metrics:
+  max_pene: 0.005  # If the initial hand penetrates the object too much, regard it as a failure
+  max_force: 1.0
+
+arm_pregrasp_is_grasp: true
+method: "op" # "op" or "ours"
+input_data: "grasp_dir"
+
+graspdata:
+  pregrasp_t: 2 # >0
+  squeeze_t: 0 # >0
+
+# evaluation setting
+offsets: [0.0] # unit: m; 0.00 or 0.02
+
+# params of our controller
+control:
+  ablation_name: "default"
+
+  Ke_scalar: 1e5
+  stage1_force_thres: 0.2
+  tan_motion_pen_weight: 1e3
+
+  free_stage_switch: true
+  stage2_after_full_path: true
+  desired_sum_force_as_traj: true
+  use_desired_sum_force_ub: true
+
+  stage2_incontact_force_only: true
+  stage2_penalize_tan_motion: false
+  balance_use_normalized: true
+  stage2_Ks_hand_only: true
+
+  stage2_tan_force_constraint: false
+  stage2_ctrl_tan_force: true
+
+  stage2_increase_force: false
+  stage2_equal_joint_force_cost: true
+
+  use_multi_contact_model: true
+  stage2_penalize_contact_qda: true
+  jaco_reference_frame: true

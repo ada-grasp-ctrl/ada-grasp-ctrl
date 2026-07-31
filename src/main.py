@@ -1,25 +1,6 @@
-import os
-import sys
-import random
-import logging
-import traceback
+"""Backward-compatible source-checkout entry point."""
 
-import hydra
-from omegaconf import DictConfig
-import numpy as np
-
-
-sys.path.append(os.path.dirname(__file__))
-from task import *
-
-seed = 12
-np.random.seed(seed)
-random.seed(seed)
-
-
-@hydra.main(config_path="../config", config_name="base", version_base=None)
-def main(cfg: DictConfig):
-    eval(f"task_{cfg.task_name}")(cfg)
+from ada_grasp_ctrl.cli import main
 
 
 if __name__ == "__main__":

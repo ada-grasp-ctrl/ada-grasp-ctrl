@@ -1,6 +1,6 @@
 <mujoco model="right_shadow_hand">
   <compiler angle="radian"
-    meshdir="/home/mingrui/mingrui/research/adaptive_grasping_2/DexGraspBench/third_party/mujoco_menagerie/shadow_hand/assets"
+    meshdir="../../../third_party/mujoco_menagerie/shadow_hand/assets"
     autolimits="true" />
 
   <option cone="elliptic" impratio="10" gravity="0 0 0" />
