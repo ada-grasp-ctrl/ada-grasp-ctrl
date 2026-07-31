@@ -153,7 +153,19 @@ def get_control_results(
     Returns:
         Statistics mapping, per-sample results, and YAML output path.
     """
-    usable_data = [data for _, _, data, error in indexed_data if data is not None and error is None]
+    non_scientific_statuses = {
+        SampleStatus.EXECUTION_ERROR.value,
+        SampleStatus.INVALID_INITIALIZATION.value,
+        SampleStatus.SOLVER_DEGRADED.value,
+    }
+    usable_data = [
+        data
+        for _, _, data, error in indexed_data
+        if data is not None
+        and error is None
+        and data.get("episode_status") not in non_scientific_statuses
+        and len(data["obj_pose"]) > 0
+    ]
     grasp_ctrl = _build_grasp_controller(configs) if usable_data else None
     lift_height = float(configs.task.lift_height)
     n_terminal_steps = int(configs.task.n_terminal_steps)
@@ -177,6 +189,19 @@ def get_control_results(
             continue
         assert record is not None
         declared_status = record.get("episode_status")
+        if declared_status == SampleStatus.EXECUTION_ERROR.value:
+            message = record.get("error_message") or record.get("message") or "Control record declares execution_error."
+            recorded_traceback = record.get("traceback")
+            result = SampleResult(
+                path,
+                SampleStatus.EXECUTION_ERROR,
+                output_paths=[path],
+                message=str(message),
+                traceback=str(recorded_traceback) if recorded_traceback is not None else None,
+            )
+            sample_results.append(result)
+            sample_status.append({"index": index, "path": path, "status": result.status.value})
+            continue
         if declared_status == SampleStatus.SOLVER_DEGRADED.value:
             degraded_cases.append(index)
             result = SampleResult(path, SampleStatus.SOLVER_DEGRADED, output_paths=[path])

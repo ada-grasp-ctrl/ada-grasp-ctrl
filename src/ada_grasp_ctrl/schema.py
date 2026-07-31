@@ -292,6 +292,22 @@ def validate_grasp_record(
         metadata_path = asset_path / "info" / "simplified.json"
         if not metadata_path.is_file():
             raise SchemaError(sample, "obj_path", f"metadata at {metadata_path}", "missing")
+        collision_directory = asset_path / "urdf" / "meshes"
+        if not collision_directory.is_dir():
+            raise SchemaError(
+                sample,
+                "obj_path",
+                f"a collision mesh directory at {collision_directory}",
+                "missing",
+            )
+        collision_meshes = sorted(collision_directory.glob("convex_piece_*.obj"))
+        if not collision_meshes:
+            raise SchemaError(
+                sample,
+                "obj_path",
+                f"at least one collision mesh below {collision_directory}",
+                "none found",
+            )
     return dict(record)
 
 

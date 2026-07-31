@@ -10,6 +10,10 @@ from .runtime import configure_runtime, write_run_manifest
 from .tasks import TASK_REGISTRY
 
 
+class _ApplicationSystemExit(SystemExit):
+    """Mark an exit code that was deliberately produced by an application error."""
+
+
 @hydra.main(config_path="config", config_name="base", version_base=None)
 def hydra_main(config: DictConfig) -> None:
     """Compose configuration and execute one registered task.
@@ -32,7 +36,7 @@ def hydra_main(config: DictConfig) -> None:
         # Catch application errors before Hydra wraps the task exception so the
         # public CLI preserves its documented exit status without a traceback.
         logging.error("%s", error)
-        raise SystemExit(error.exit_code) from error
+        raise _ApplicationSystemExit(error.exit_code) from error
 
 
 def main() -> None:
@@ -41,7 +45,18 @@ def main() -> None:
     Returns:
         None. The function exits the process when a known application error occurs.
     """
-    hydra_main()
+    try:
+        hydra_main()
+    except _ApplicationSystemExit as error:
+        # Hydra composition failures and application failures can both use code
+        # 1 internally. Preserve only codes explicitly assigned by our tasks.
+        raise SystemExit(error.code) from None
+    except SystemExit as error:
+        if error.code in (None, 0):
+            raise
+        # Hydra emits a concise configuration error before raising SystemExit.
+        # Public configuration failures consistently use the documented code 2.
+        raise SystemExit(2) from None
 
 
 if __name__ == "__main__":

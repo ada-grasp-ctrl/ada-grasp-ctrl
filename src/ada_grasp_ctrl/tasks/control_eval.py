@@ -17,7 +17,9 @@ from ada_grasp_ctrl.batch import (
     write_batch_report,
 )
 from ada_grasp_ctrl.errors import PreflightError
+from ada_grasp_ctrl.paths import resolve_from_root
 from ada_grasp_ctrl.runtime import write_run_manifest
+from ada_grasp_ctrl.schema import SchemaError, load_npy_record, validate_grasp_record
 from ada_grasp_ctrl.tasks.control_eval_func.base import control_output_path
 from ada_grasp_ctrl.tasks.control_eval_func.tabletop_dummy_arm_bs1 import tabletopDummyArmBS1Eval
 from ada_grasp_ctrl.tasks.control_eval_func.tabletop_dummy_arm_bs2 import tabletopDummyArmBS2Eval
@@ -132,6 +134,36 @@ def _validate_control_preflight(configs: Any) -> None:
         raise PreflightError("task.offsets must contain at least one perturbation distance.")
 
 
+def _validate_object_assets(input_paths: list[str]) -> None:
+    """Validate assets referenced by structurally valid selected grasp records.
+
+    Malformed or unreadable records remain sample-level execution errors so one
+    damaged file does not prevent the rest of a batch from running. Once a
+    record satisfies the grasp schema, however, its shared object resources are
+    task-level prerequisites and must fail before worker processes start.
+
+    Args:
+        input_paths: Deterministically selected grasp record paths.
+
+    Returns:
+        None.
+
+    Raises:
+        PreflightError: If a valid grasp references missing object resources.
+    """
+    for input_path in input_paths:
+        try:
+            record = validate_grasp_record(load_npy_record(input_path), input_path)
+        except Exception:
+            continue
+        resolved_record = dict(record)
+        resolved_record["obj_path"] = str(resolve_from_root(resolved_record["obj_path"]))
+        try:
+            validate_grasp_record(resolved_record, input_path, require_assets=True)
+        except SchemaError as error:
+            raise PreflightError(f"Object asset preflight failed: {error}") from error
+
+
 def task_control_eval(configs: Any) -> None:
     """Run a control batch and report every input without swallowing errors.
 
@@ -158,6 +190,7 @@ def task_control_eval(configs: Any) -> None:
         max_num=int(configs.task.max_num),
         seed=int(configs.seed),
     )
+    _validate_object_assets(selected)
     write_run_manifest(configs, discovered)
     logging.info(
         "Found %d grasp files in %s, skipped %d, processing %d.",

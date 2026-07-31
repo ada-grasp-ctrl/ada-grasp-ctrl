@@ -217,6 +217,52 @@ class PipelineContractTest(unittest.TestCase):
         self.assertIsNone(saved["success_rate"])
         self.assertNotIn("nan", output_path.read_text().lower())
 
+    def test_declared_execution_errors_remain_errors_in_statistics(self):
+        """Exclude declared execution errors from every scientific outcome bucket."""
+        configs = OmegaConf.create(
+            {
+                "control_dir": str(self.root / "control"),
+                "hand_name": "dummy_arm_shadow",
+                "task": {
+                    "method": "ours",
+                    "ablation_name": "default",
+                    "setting_name": "dist_0",
+                    "lift_height": 0.2,
+                    "n_terminal_steps": 5,
+                },
+            }
+        )
+        pose = np.array([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0])
+        indexed_data = [
+            (
+                0,
+                "empty_error.npy",
+                {"episode_status": "execution_error", "obj_pose": [], "contacts": []},
+                None,
+            ),
+            (
+                1,
+                "trajectory_error.npy",
+                {
+                    "episode_status": "execution_error",
+                    "obj_pose": np.stack([pose, pose]),
+                    "contacts": [[], []],
+                    "error_message": "worker failed",
+                },
+                None,
+            ),
+        ]
+
+        statistics, results, _ = get_control_results(indexed_data, configs)
+
+        self.assertEqual([result.status for result in results], [SampleStatus.EXECUTION_ERROR] * 2)
+        self.assertEqual(statistics["execution_error"], 2)
+        self.assertEqual(statistics["invalid_initialization"], 0)
+        self.assertEqual(statistics["success"], 0)
+        self.assertEqual(statistics["failure"], 0)
+        self.assertEqual(statistics["success_rate_denominator"], 0)
+        self.assertIsNone(statistics["success_rate"])
+
     def test_registries_workers_and_seed_are_explicit_and_reproducible(self):
         """Expose only public tasks/methods and reproduce NumPy samples."""
         self.assertEqual(
@@ -237,6 +283,9 @@ class PipelineContractTest(unittest.TestCase):
 
     def test_cli_preserves_exit_codes_without_hydra_tracebacks(self):
         """Prove successful, batch-failure, and preflight exit semantics in subprocesses."""
+        unknown_task = self._run_cli("task=unsupported")
+        unknown_hand = self._run_cli("task=control_stat", "hand=unsupported")
+
         empty_root = self.root / "empty"
         successful = self._run_cli(
             "task=control_stat",
@@ -286,11 +335,112 @@ class PipelineContractTest(unittest.TestCase):
             f"log_dir={missing_asset_root / 'log'}",
         )
 
+        project_grasp = np.load(
+            project_root / "examples" / "data" / "shadow" / "dummy_arm" / "grasp.npy",
+            allow_pickle=True,
+        ).item()
+        missing_object_root = self.root / "missing_object"
+        missing_object_grasp_dir = missing_object_root / "grasp"
+        missing_object_grasp_dir.mkdir(parents=True)
+        missing_object_record = dict(project_grasp)
+        missing_object_record["obj_path"] = str(missing_object_root / "absent_object")
+        np.save(missing_object_grasp_dir / "grasp.npy", missing_object_record)
+        missing_object = self._run_cli(
+            "task=control_eval",
+            "hand=dummy_arm_shadow",
+            "n_worker=1",
+            f"grasp_dir={missing_object_grasp_dir}",
+            f"control_dir={missing_object_root / 'control'}",
+            f"save_dir={missing_object_root}",
+            f"log_dir={missing_object_root / 'log'}",
+        )
+
+        missing_mesh_root = self.root / "missing_mesh"
+        object_root = missing_mesh_root / "object"
+        (object_root / "info").mkdir(parents=True)
+        (object_root / "urdf" / "meshes").mkdir(parents=True)
+        (object_root / "info" / "simplified.json").write_text(
+            json.dumps({"mass": 1.0, "density": 1.0, "scale": 1.0}),
+            encoding="utf-8",
+        )
+        missing_mesh_grasp_dir = missing_mesh_root / "grasp"
+        missing_mesh_grasp_dir.mkdir()
+        missing_mesh_record = dict(project_grasp)
+        missing_mesh_record["obj_path"] = str(object_root)
+        np.save(missing_mesh_grasp_dir / "grasp.npy", missing_mesh_record)
+        missing_mesh = self._run_cli(
+            "task=control_eval",
+            "hand=dummy_arm_shadow",
+            "n_worker=1",
+            f"grasp_dir={missing_mesh_grasp_dir}",
+            f"control_dir={missing_mesh_root / 'control'}",
+            f"save_dir={missing_mesh_root}",
+            f"log_dir={missing_mesh_root / 'log'}",
+        )
+
+        damaged_control_root = self.root / "damaged_control"
+        damaged_control_grasp_dir = damaged_control_root / "grasp"
+        damaged_control_grasp_dir.mkdir(parents=True)
+        (damaged_control_grasp_dir / "broken.npy").write_bytes(b"not a NumPy file")
+        damaged_control = self._run_cli(
+            "task=control_eval",
+            "hand=dummy_arm_shadow",
+            "n_worker=1",
+            f"grasp_dir={damaged_control_grasp_dir}",
+            f"control_dir={damaged_control_root / 'control'}",
+            f"save_dir={damaged_control_root}",
+            f"log_dir={damaged_control_root / 'log'}",
+        )
+
+        declared_error_root = self.root / "declared_error"
+        declared_error_method_dir = declared_error_root / "control" / "ours_default"
+        declared_error_method_dir.mkdir(parents=True)
+        np.save(
+            declared_error_method_dir / "sample_dist_0.npy",
+            {
+                "schema_version": 1,
+                "episode_status": "execution_error",
+                "obj_pose": np.stack([np.array([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0])]),
+                "contacts": [[]],
+                "error_message": "recorded worker failure",
+            },
+        )
+        declared_error_stat = self._run_cli(
+            "task=control_stat",
+            "hand=dummy_arm_shadow",
+            "n_worker=1",
+            f"control_dir={declared_error_root / 'control'}",
+            f"save_dir={declared_error_root}",
+            f"log_dir={declared_error_root / 'log'}",
+        )
+
+        self.assertEqual(unknown_task.returncode, 2, unknown_task.stderr)
+        self.assertEqual(unknown_hand.returncode, 2, unknown_hand.stderr)
         self.assertEqual(successful.returncode, 0, successful.stderr)
         self.assertEqual(batch_failure.returncode, 1, batch_failure.stderr)
         self.assertEqual(preflight_failure.returncode, 2, preflight_failure.stderr)
         self.assertEqual(missing_asset.returncode, 2, missing_asset.stderr)
-        for process in (successful, batch_failure, preflight_failure, missing_asset):
+        self.assertEqual(missing_object.returncode, 2, missing_object.stderr)
+        self.assertEqual(missing_mesh.returncode, 2, missing_mesh.stderr)
+        self.assertEqual(damaged_control.returncode, 1, damaged_control.stderr)
+        self.assertEqual(declared_error_stat.returncode, 1, declared_error_stat.stderr)
+        declared_error_statistics = yaml.safe_load(
+            (declared_error_root / "control_stat_res" / "dist_0_ours_default.yaml").read_text()
+        )
+        self.assertEqual(declared_error_statistics["execution_error"], 1)
+        self.assertEqual(declared_error_statistics["success_rate_denominator"], 0)
+        for process in (
+            unknown_task,
+            unknown_hand,
+            successful,
+            batch_failure,
+            preflight_failure,
+            missing_asset,
+            missing_object,
+            missing_mesh,
+            damaged_control,
+            declared_error_stat,
+        ):
             self.assertNotIn("Traceback", process.stdout + process.stderr)
 
 
