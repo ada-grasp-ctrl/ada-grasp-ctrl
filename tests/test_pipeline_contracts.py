@@ -27,7 +27,8 @@ from ada_grasp_ctrl.schema import SchemaError, load_npy_record, validate_grasp_r
 from ada_grasp_ctrl.tasks import TASK_REGISTRY
 from ada_grasp_ctrl.tasks.control_eval import METHOD_REGISTRY
 from ada_grasp_ctrl.tasks.control_stat import get_control_results
-from ada_grasp_ctrl.tasks.convert_format import Batched, Learning
+from ada_grasp_ctrl.tasks.convert_format import BODex, Batched, Learning
+from ada_grasp_ctrl.utils.robots.base import RobotFactory
 
 
 def _seeded_worker(params: tuple[int, int]) -> tuple[int, float, float, float]:
@@ -102,6 +103,25 @@ class PipelineContractTest(unittest.TestCase):
             }
         )
 
+    def _hand_converter_config(self, hand_name: str, *, mocap: bool = True):
+        """Build a converter configuration for one concrete hand.
+
+        Args:
+            hand_name: Registered hand name.
+            mocap: Whether BODex records contain exactly three named poses.
+
+        Returns:
+            OmegaConf configuration rooted in the current fixture.
+        """
+        return OmegaConf.create(
+            {
+                "task": {"data_path": str(self.root / "raw")},
+                "grasp_dir": str(self.root / "formatted" / hand_name),
+                "hand_name": hand_name,
+                "hand": {"mocap": mocap},
+            }
+        )
+
     def _run_cli(self, *overrides: str) -> subprocess.CompletedProcess[str]:
         """Run the source-checkout CLI and capture its public process contract.
 
@@ -164,6 +184,79 @@ class PipelineContractTest(unittest.TestCase):
         )
         self.assertEqual(load_npy_record(batched_outputs[0])["obj_scale"], 0.5)
         self.assertEqual(load_npy_record(batched_outputs[1])["obj_scale"], 1.5)
+
+    def test_bodex_converts_all_hands_with_exact_joint_order(self):
+        """Exercise hand-specific pose transforms and preserve verified names."""
+        scene_path = self._scene_path()
+        raw_root = self.root / "raw"
+        raw_root.mkdir()
+
+        for hand_name in ("shadow", "allegro", "leap_tac3d"):
+            prefix = "" if hand_name == "allegro" else "rh_"
+            robot = RobotFactory.create_robot(robot_type=hand_name, prefix=prefix)
+            expected_names = list(robot.dof_names)
+            raw_names = expected_names[-5:] + expected_names[:-5] if hand_name == "shadow" else expected_names
+            qpos_dim = 7 + robot.n_dof
+            robot_pose = np.zeros((1, 2, 3, qpos_dim))
+            robot_pose[..., 3] = 1.0
+            robot_pose[..., 7:] = np.arange(robot.n_dof)
+            raw_path = raw_root / f"{hand_name}_mogen.npy"
+            np.save(
+                raw_path,
+                {
+                    "scene_path": str(scene_path),
+                    "robot_pose": robot_pose,
+                    "joint_names": raw_names,
+                },
+            )
+
+            outputs = BODex((str(raw_path), self._hand_converter_config(hand_name)))
+
+            self.assertEqual(len(outputs), 2)
+            for output in outputs:
+                record = load_npy_record(output)
+                self.assertEqual(record["joint_names"], expected_names)
+                validate_grasp_record(
+                    record,
+                    output,
+                    expected_joint_dim=qpos_dim,
+                    expected_joint_names=expected_names,
+                    qpos_prefix_dim=7,
+                    require_joint_names=True,
+                )
+            if hand_name == "shadow":
+                expected_joint_qpos = np.concatenate([np.arange(robot.n_dof)[5:], np.arange(robot.n_dof)[:5]])
+                np.testing.assert_array_equal(load_npy_record(outputs[0])["grasp_qpos"][7:], expected_joint_qpos)
+
+    def test_bodex_non_mocap_layout_preserves_approach_and_lift(self):
+        """Map the final four trajectory poses without dropping approach data."""
+        scene_path = self._scene_path()
+        raw_root = self.root / "raw"
+        raw_root.mkdir()
+        robot = RobotFactory.create_robot(robot_type="leap_tac3d", prefix="rh_")
+        qpos_dim = 7 + robot.n_dof
+        robot_pose = np.zeros((1, 1, 5, qpos_dim))
+        robot_pose[..., 3] = 1.0
+        for step in range(robot_pose.shape[2]):
+            robot_pose[:, :, step, 7:] = step
+        raw_path = raw_root / "leap_full_mogen.npy"
+        np.save(
+            raw_path,
+            {
+                "scene_path": str(scene_path),
+                "robot_pose": robot_pose,
+                "joint_names": robot.dof_names,
+            },
+        )
+
+        output = BODex((str(raw_path), self._hand_converter_config("leap_tac3d", mocap=False)))[0]
+        record = load_npy_record(output)
+
+        self.assertEqual(record["approach_qpos"].shape, (1, qpos_dim))
+        np.testing.assert_array_equal(record["pregrasp_qpos"][7:], np.ones(robot.n_dof))
+        np.testing.assert_array_equal(record["grasp_qpos"][7:], np.full(robot.n_dof, 2.0))
+        np.testing.assert_array_equal(record["squeeze_qpos"][7:], np.full(robot.n_dof, 3.0))
+        np.testing.assert_array_equal(record["lift_qpos"][7:], np.full(robot.n_dof, 4.0))
 
     def test_schema_error_names_sample_field_expected_and_actual(self):
         """Return actionable context for a malformed grasp field."""
@@ -311,6 +404,58 @@ class PipelineContractTest(unittest.TestCase):
             parallel = sorted(pool.imap_unordered(_seeded_worker, reversed(params)))
         self.assertEqual(serial, parallel)
 
+    def test_format_outputs_are_invariant_to_serial_parallel_and_auto_workers(self):
+        """Compare real converter outputs and sample seeds across worker policies."""
+        scene_path = self._scene_path()
+        raw_root = self.root / "deterministic_raw"
+        raw_root.mkdir()
+        for index in range(4):
+            qpos = np.zeros(29)
+            qpos[3] = 1.0
+            qpos[7:] = index + np.arange(22) / 100.0
+            np.save(
+                raw_root / f"sample_{index}.npy",
+                {
+                    "scene_path": str(scene_path),
+                    "pregrasp_qpos": qpos - 0.1,
+                    "grasp_qpos": qpos,
+                    "squeeze_qpos": qpos + 0.1,
+                },
+            )
+
+        records_by_policy = {}
+        seeds_by_policy = {}
+        for policy in ("1", "2", "auto"):
+            run_root = self.root / f"workers_{policy}"
+            process = self._run_cli(
+                "task=format",
+                "hand=shadow",
+                "task.data_name=Learning",
+                f"task.data_path={raw_root}",
+                f"n_worker={policy}",
+                "seed=77",
+                f"save_dir={run_root}",
+                f"grasp_dir={run_root / 'formatted'}",
+                f"log_dir={run_root / 'log'}",
+            )
+            self.assertEqual(process.returncode, 0, process.stdout + process.stderr)
+            records_by_policy[policy] = {
+                path.name: load_npy_record(path) for path in sorted((run_root / "formatted").glob("*.npy"))
+            }
+            report = json.loads((run_root / "log" / "run_report.json").read_text())
+            seeds_by_policy[policy] = [result["details"]["sample_seed"] for result in report["results"]]
+
+        self.assertEqual(seeds_by_policy["1"], seeds_by_policy["2"])
+        self.assertEqual(seeds_by_policy["1"], seeds_by_policy["auto"])
+        self.assertEqual(set(records_by_policy["1"]), {f"sample_{index}.npy" for index in range(4)})
+        for policy in ("2", "auto"):
+            self.assertEqual(records_by_policy["1"].keys(), records_by_policy[policy].keys())
+            for filename, expected in records_by_policy["1"].items():
+                actual = records_by_policy[policy][filename]
+                self.assertEqual(expected.keys(), actual.keys())
+                for field in expected:
+                    np.testing.assert_equal(actual[field], expected[field])
+
     def test_cli_preserves_exit_codes_without_hydra_tracebacks(self):
         """Prove successful, batch-failure, and preflight exit semantics in subprocesses."""
         unknown_task = self._run_cli("task=unsupported")
@@ -330,6 +475,17 @@ class PipelineContractTest(unittest.TestCase):
         raw_root = damaged_root / "raw"
         raw_root.mkdir(parents=True)
         (raw_root / "broken.npy").write_bytes(b"not a NumPy file")
+        qpos = np.zeros(29)
+        qpos[3] = 1.0
+        np.save(
+            raw_root / "valid.npy",
+            {
+                "scene_path": str(self._scene_path()),
+                "pregrasp_qpos": qpos,
+                "grasp_qpos": qpos,
+                "squeeze_qpos": qpos,
+            },
+        )
         batch_failure = self._run_cli(
             "task=format",
             "hand=shadow",
@@ -448,6 +604,10 @@ class PipelineContractTest(unittest.TestCase):
         self.assertEqual(unknown_hand.returncode, 2, unknown_hand.stderr)
         self.assertEqual(successful.returncode, 0, successful.stderr)
         self.assertEqual(batch_failure.returncode, 1, batch_failure.stderr)
+        self.assertTrue((damaged_root / "grasp" / "valid.npy").is_file())
+        damaged_report = json.loads((damaged_root / "log" / "run_report.json").read_text())
+        self.assertEqual(damaged_report["num_completed"], 1)
+        self.assertEqual(damaged_report["num_execution_error"], 1)
         self.assertEqual(preflight_failure.returncode, 2, preflight_failure.stderr)
         self.assertEqual(missing_asset.returncode, 2, missing_asset.stderr)
         self.assertEqual(missing_object.returncode, 2, missing_object.stderr)

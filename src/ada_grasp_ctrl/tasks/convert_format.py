@@ -252,11 +252,15 @@ def BODex(params: tuple[str, Any]) -> list[str]:
         rotation = torch_quaternion_to_matrix(torch.tensor(robot_pose[:, :, 3:7], dtype=torch.float32))
         robot_pose[:, :, :3] -= (rotation @ torch.tensor([0, 0, 0.034]).view(1, 1, 3, 1)).squeeze(-1).numpy()
     elif configs.hand_name == "allegro":
+        common["joint_names"] = list(raw_data["joint_names"])
         rotation = torch_quaternion_to_matrix(torch.tensor(robot_pose[:, :, 3:7]))
-        delta = torch_quaternion_to_matrix(torch.tensor([0, 1, 0, 1]).view(1, 1, 4))
+        # Keep the fixed frame correction beside the source tensor so float32
+        # and float64 BODex records follow the same supported code path.
+        delta_quaternion = rotation.new_tensor([0, 1, 0, 1]).view(1, 1, 4)
+        delta = torch_quaternion_to_matrix(delta_quaternion)
         robot_pose[:, :, 3:7] = torch_matrix_to_quaternion(rotation @ delta.transpose(-1, -2))
     elif configs.hand_name == "leap_tac3d":
-        pass
+        common["joint_names"] = list(raw_data["joint_names"])
     else:
         raise ValueError(
             f"{data_file}: BODex converter supports shadow, allegro, and leap_tac3d; got {configs.hand_name}."
