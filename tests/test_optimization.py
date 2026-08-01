@@ -1,20 +1,28 @@
 """Finite-difference and safety tests for shared SLSQP helpers."""
 
+from pathlib import Path
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 import warnings
 
 import numpy as np
+from omegaconf import OmegaConf
 
 from ada_grasp_ctrl.optimization import (
+    SOLVER_FAILURE_POLICIES,
     diagnose_slsqp_result,
     friction_cone_jacobian,
     friction_cone_slack,
     select_control_solution,
     solve_linear_system,
 )
-from ada_grasp_ctrl.utils.grasp_controller import GraspController, _ControlProblemContext
+from ada_grasp_ctrl.errors import ControlSolveEpisodeAbort
+from ada_grasp_ctrl.utils.grasp_controller import (
+    GraspController,
+    GraspControllerParameters,
+    _ControlProblemContext,
+)
 
 
 class OptimizationHelperTest(unittest.TestCase):
@@ -108,31 +116,157 @@ class OptimizationHelperTest(unittest.TestCase):
         bounds = [(0.0, 2.0), (0.0, 1.0)]
         accepted = diagnose_slsqp_result(self._result([1.0, 0.5]), constraints, bounds)
         self.assertTrue(accepted["accepted"])
+        self.assertTrue(accepted["candidate_applicable"])
 
         nonconverged = diagnose_slsqp_result(self._result([1.0, 0.5], success=False, status=9), constraints, bounds)
         self.assertFalse(nonconverged["accepted"])
+        self.assertTrue(nonconverged["candidate_applicable"])
         nonfinite = diagnose_slsqp_result(self._result([np.nan, 0.5], fun=np.nan), constraints, bounds)
         self.assertFalse(nonfinite["finite"])
-        violated_constraint = diagnose_slsqp_result(self._result([1.0, -2e-5]), constraints, bounds)
-        self.assertFalse(violated_constraint["accepted"])
+        self.assertFalse(nonfinite["candidate_applicable"])
+        violated_equality = diagnose_slsqp_result(self._result([1.0 + 2e-5, 0.5]), constraints, bounds)
+        self.assertFalse(violated_equality["accepted"])
+        self.assertTrue(violated_equality["candidate_applicable"])
+        violated_inequality = diagnose_slsqp_result(self._result([1.0, -2e-5]), constraints, bounds)
+        self.assertFalse(violated_inequality["accepted"])
+        self.assertTrue(violated_inequality["candidate_applicable"])
         violated_bound = diagnose_slsqp_result(self._result([1.0, 1.0 + 2e-8]), constraints, bounds)
         self.assertFalse(violated_bound["accepted"])
+        self.assertTrue(violated_bound["candidate_applicable"])
+        violated_joint_limit = diagnose_slsqp_result(
+            self._result([1.0, 0.5]),
+            constraints,
+            bounds,
+            joint_limit_constraint=lambda x: np.array([-2e-8]),
+        )
+        self.assertFalse(violated_joint_limit["accepted"])
+        self.assertTrue(violated_joint_limit["candidate_applicable"])
+        rejected_candidates = (
+            (violated_equality, np.array([1.0 + 2e-5, 0.5])),
+            (violated_inequality, np.array([1.0, -2e-5])),
+            (violated_bound, np.array([1.0, 1.0 + 2e-8])),
+            (violated_joint_limit, np.array([1.0, 0.5])),
+        )
+        for diagnostics, candidate in rejected_candidates:
+            decision = select_control_solution(
+                np.zeros(2),
+                np.zeros(0),
+                candidate,
+                2,
+                diagnostics,
+                failure_policy="apply_candidate",
+            )
+            self.assertEqual(decision.decision, "apply_candidate")
+            self.assertFalse(diagnostics["accepted"])
 
-    def test_rejected_control_solution_holds_qpos_and_zeros_delta_history(self):
-        """Never apply rejected qpos/contact-force candidates."""
+    def test_control_solution_policy_matrix(self):
+        """Apply, hold, or abort one finite rejected command as configured."""
         current_qpos = np.array([0.2, -0.4])
         measured_force = np.array([3.0, 0.1, -0.2])
         candidate = np.array([0.5, 0.6, 99.0, 98.0, 97.0])
-        qpos, delta, force = select_control_solution(
+        diagnostics = {"accepted": False, "candidate_applicable": True}
+
+        applied = select_control_solution(
             current_qpos,
             measured_force,
             candidate,
             2,
-            {"accepted": False},
+            diagnostics,
+            failure_policy="apply_candidate",
         )
-        np.testing.assert_array_equal(qpos, current_qpos)
-        np.testing.assert_array_equal(delta, np.zeros(2))
-        np.testing.assert_array_equal(force, measured_force)
+        np.testing.assert_allclose(applied.qpos, np.array([0.7, 0.2]), rtol=0, atol=1e-15)
+        np.testing.assert_array_equal(applied.delta_qpos, candidate[:2])
+        np.testing.assert_array_equal(applied.contact_forces, candidate[2:])
+        self.assertEqual(applied.decision, "apply_candidate")
+        self.assertTrue(applied.action_applied)
+        self.assertFalse(applied.episode_aborted)
+
+        default_applied = select_control_solution(current_qpos, measured_force, candidate, 2, diagnostics)
+        self.assertEqual(default_applied.decision, "apply_candidate")
+        np.testing.assert_array_equal(default_applied.qpos, applied.qpos)
+
+        held = select_control_solution(
+            current_qpos,
+            measured_force,
+            candidate,
+            2,
+            diagnostics,
+            failure_policy="hold_current",
+        )
+        np.testing.assert_array_equal(held.qpos, current_qpos)
+        np.testing.assert_array_equal(held.delta_qpos, np.zeros(2))
+        np.testing.assert_array_equal(held.contact_forces, measured_force)
+        self.assertEqual(held.decision, "hold_current")
+        self.assertTrue(held.action_applied)
+        self.assertFalse(held.episode_aborted)
+
+        aborted = select_control_solution(
+            current_qpos,
+            measured_force,
+            candidate,
+            2,
+            diagnostics,
+            failure_policy="fail_episode",
+        )
+        self.assertIsNone(aborted.qpos)
+        self.assertEqual(aborted.decision, "abort_episode")
+        self.assertFalse(aborted.action_applied)
+        self.assertTrue(aborted.episode_aborted)
+
+    def test_accepted_control_solution_is_policy_invariant(self):
+        """Apply an accepted candidate identically under every failure policy."""
+        decisions = [
+            select_control_solution(
+                np.array([0.2, -0.4]),
+                np.array([3.0, 0.1, -0.2]),
+                np.array([0.5, 0.6, 9.0, 8.0, 7.0]),
+                2,
+                {"accepted": True, "candidate_applicable": True},
+                failure_policy=policy,
+            )
+            for policy in SOLVER_FAILURE_POLICIES
+        ]
+        for decision in decisions:
+            np.testing.assert_array_equal(decision.qpos, decisions[0].qpos)
+            np.testing.assert_array_equal(decision.delta_qpos, decisions[0].delta_qpos)
+            np.testing.assert_array_equal(decision.contact_forces, decisions[0].contact_forces)
+            self.assertEqual(decision.decision, "apply_accepted")
+            self.assertFalse(decision.episode_aborted)
+
+    def test_nonapplicable_candidates_never_reach_an_action(self):
+        """Abort apply/fail policies and hold safely for malformed candidates."""
+        malformed_candidates = (
+            None,
+            "not numeric",
+            np.array([0.1, 0.2]),
+            np.array([0.1, 0.2, np.nan, 0.0, 0.0]),
+            np.array([0.1, 0.2, np.inf, 0.0, 0.0]),
+        )
+        for candidate in malformed_candidates:
+            with self.subTest(candidate=repr(candidate)):
+                for policy in ("apply_candidate", "fail_episode"):
+                    decision = select_control_solution(
+                        np.array([0.2, -0.4]),
+                        np.array([3.0, 0.1, -0.2]),
+                        candidate,
+                        2,
+                        {"accepted": False, "candidate_applicable": False},
+                        failure_policy=policy,
+                    )
+                    self.assertTrue(decision.episode_aborted)
+                    self.assertFalse(decision.action_applied)
+                    self.assertIsNone(decision.qpos)
+
+                held = select_control_solution(
+                    np.array([0.2, -0.4]),
+                    np.array([3.0, 0.1, -0.2]),
+                    candidate,
+                    2,
+                    {"accepted": False, "candidate_applicable": False},
+                    failure_policy="hold_current",
+                )
+                np.testing.assert_array_equal(held.qpos, np.array([0.2, -0.4]))
+                self.assertTrue(np.all(np.isfinite(held.qpos)))
 
 
 class SharedControlProblemTest(unittest.TestCase):
@@ -146,15 +280,52 @@ class SharedControlProblemTest(unittest.TestCase):
             Controller exposing all configuration flags used by the builder.
         """
         controller = object.__new__(GraspController)
+        controller.parameters = GraspControllerParameters.from_config(
+            OmegaConf.create(
+                {
+                    "balance_thres": 0.2,
+                    "friction_cone_mu": 0.3,
+                    "final_sum_force": 15.0,
+                    "kp_clip": {"min": 0.0, "max": 1e3},
+                    "objective_weights": {
+                        "hand_base_pose": [0.0, 0.0, 100.0, 10.0, 10.0, 10.0],
+                        "hand_joint_position": 1.0,
+                        "joint_velocity": 0.01,
+                        "joint_acceleration": 0.001,
+                        "coordinated_tangential_force": 0.1,
+                        "equal_contact_force": 1.0,
+                        "control_wrench": [1.0] * 6,
+                        "equal_joint_force": 0.01,
+                        "in_contact_joint_velocity_multiplier": 100.0,
+                    },
+                    "wrench_balance": {
+                        "normal_force_sum": 1.0,
+                        "wrench_weights": [1.0] * 6,
+                        "normal_force_bounds": [0.0, 10.0],
+                        "tangential_force_bounds": [-10.0, 10.0],
+                        "ftol": 1e-6,
+                        "maxiter": 200,
+                    },
+                    "command_solver": {
+                        "normal_force_bounds": [0.0, 100.0],
+                        "tangential_force_bounds": [-50.0, 50.0],
+                        "ftol": 1e-6,
+                        "maxiter": 200,
+                    },
+                }
+            )
+        )
         controller.mu = 0.3
         controller.tan_motion_pen_weight = 2.0
         controller.stage2_incontact_force_only = False
         controller.stage2_penalize_contact_qda = False
         controller.stage2_penalize_tan_motion = False
         controller.stage2_ctrl_tan_force = True
+        controller.stage1_tan_force_constraint = False
         controller.stage2_tan_force_constraint = False
         controller.stage2_equal_joint_force_cost = False
         controller.stage2_increase_force = False
+        controller.solver_failure_policy = "hold_current"
         return controller
 
     @staticmethod
@@ -216,6 +387,87 @@ class SharedControlProblemTest(unittest.TestCase):
         )
         return controller, problem
 
+    def test_constructor_uses_hydra_parameters_without_robot_name_dispatch(self):
+        """Read Hydra parameters and preserve the legacy shared contact-model switch."""
+        project_root = Path(__file__).resolve().parents[1]
+        task_defaults = OmegaConf.load(
+            project_root / "src" / "ada_grasp_ctrl" / "config" / "task" / "control_eval.yaml"
+        )
+        composed = OmegaConf.create(
+            {
+                "hand": {"controller": {"final_sum_force": 12.0}},
+                "task": OmegaConf.to_container(task_defaults, resolve=False),
+            }
+        )
+        composed.task.control.kp_clip.min = 2.0
+        composed.task.control.kp_clip.max = 5.0
+        robot = SimpleNamespace(doa_kp=np.array([1.0, 10.0]))
+
+        controller = GraspController(
+            configs=composed.task.control,
+            robot=robot,
+            robot_adaptor=object(),
+        )
+
+        self.assertEqual(controller.final_sum_force, 12.0)
+        self.assertEqual(controller.balance_thres, 0.2)
+        self.assertEqual(controller.mu, 0.3)
+        self.assertTrue(controller.stage1_tan_force_constraint)
+        self.assertFalse(controller.stage2_tan_force_constraint)
+        np.testing.assert_array_equal(controller.Kp, np.diag([2.0, 5.0]))
+        np.testing.assert_array_equal(controller.Kp_inv, np.diag([0.5, 0.2]))
+
+        del composed.task.control.stage1_tan_force_constraint
+        composed.task.control.stage2_tan_force_constraint = True
+        legacy_controller = GraspController(
+            configs=composed.task.control,
+            robot=robot,
+            robot_adaptor=object(),
+        )
+        self.assertTrue(legacy_controller.stage1_tan_force_constraint)
+        self.assertTrue(legacy_controller.stage2_tan_force_constraint)
+
+    def test_stage_specific_tangential_contact_model_constraints_are_independent(self):
+        """Toggle the full contact model independently in Stage 1 and Stage 2."""
+        controller = self._controller()
+        context = self._context()
+        common = dict(
+            policy="coordinated",
+            context=context,
+            dt=0.2,
+            current_qpos_a=np.array([0.1, -0.2]),
+            target_qpos_f=np.array([0.0, 0.3]),
+            last_delta_qpos_a=np.array([0.02, -0.01]),
+            desired_sum_force=2.0,
+            desired_forces=None,
+            contacts=[{}],
+            grasp_matrix=np.zeros((6, 3)),
+            use_arm_motion=True,
+        )
+
+        def contact_model_dimension(stage: int) -> int:
+            """Return the equality dimension for one stage's contact model.
+
+            Args:
+                stage: Controller stage whose contact-model constraint is inspected.
+            """
+            problem = controller._build_control_problem(stage=stage, **common)
+            constraint_index = problem.constraint_names.index("contact_model")
+            residual = problem.constraints[constraint_index]["fun"](problem.initial_variables)
+            return np.asarray(residual).size
+
+        self.assertEqual(contact_model_dimension(stage=1), 1)
+        self.assertEqual(contact_model_dimension(stage=2), 1)
+
+        controller.stage1_tan_force_constraint = True
+        self.assertEqual(contact_model_dimension(stage=1), 3)
+        self.assertEqual(contact_model_dimension(stage=2), 1)
+
+        controller.stage1_tan_force_constraint = False
+        controller.stage2_tan_force_constraint = True
+        self.assertEqual(contact_model_dimension(stage=1), 1)
+        self.assertEqual(contact_model_dimension(stage=2), 3)
+
     def test_public_wrappers_delegate_to_the_same_optimizer(self):
         """Keep both compatibility APIs on one shared optimization path."""
         controller = self._controller()
@@ -262,6 +514,39 @@ class SharedControlProblemTest(unittest.TestCase):
             ),
         )
         self.assertEqual(equal_contact.constraint_names, ("q_limits", "arm_doa", "contact_model"))
+        self.assertEqual(
+            coordinated.bounds[-3:],
+            [(0.0, 100.0), (-50.0, 50.0), (-50.0, 50.0)],
+        )
+
+    def test_wrench_balance_uses_hydra_bounds_and_solver_options(self):
+        """Pass the configured balance normalization, bounds, and SLSQP options."""
+        controller = self._controller()
+        controller.balance_use_normalized = True
+        controller.r_data = {"solver_diagnostics": []}
+        controller.solver_degraded = False
+        accepted = SimpleNamespace(
+            x=np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
+            success=True,
+            fun=0.0,
+            status=0,
+            message="accepted",
+            nit=1,
+        )
+
+        with patch("ada_grasp_ctrl.utils.grasp_controller.minimize", return_value=accepted) as minimize_mock:
+            metric, forces = controller.check_wrench_balance(np.zeros((6, 6)))
+
+        self.assertEqual(metric, 0.0)
+        np.testing.assert_array_equal(forces, accepted.x)
+        self.assertEqual(
+            minimize_mock.call_args.kwargs["bounds"],
+            [(0.0, 10.0), (-10.0, 10.0), (-10.0, 10.0)] * 2,
+        )
+        self.assertEqual(
+            minimize_mock.call_args.kwargs["options"],
+            {"ftol": 1e-6, "disp": False, "maxiter": 200},
+        )
 
     def test_optional_stage2_cost_gradient_matches_finite_difference(self):
         """Differentiate optional tangential costs under the full contact model."""
@@ -282,8 +567,8 @@ class SharedControlProblemTest(unittest.TestCase):
         analytic = problem.jacobian(variables)
         np.testing.assert_allclose(analytic, numeric, rtol=1e-6, atol=1e-5)
 
-    def test_shared_solver_rejects_failed_candidate(self):
-        """Keep the hold-last fallback after moving both APIs to one solver."""
+    def test_shared_solver_holds_failed_candidate_and_preserves_warnings(self):
+        """Keep the explicit hold behavior and scoped warning handling."""
         controller = self._controller()
         controller.r_data = {"solver_diagnostics": []}
         controller.solver_degraded = False
@@ -316,7 +601,10 @@ class SharedControlProblemTest(unittest.TestCase):
 
         with warnings.catch_warnings(record=True) as observed_warnings:
             warnings.simplefilter("always")
-            with patch("ada_grasp_ctrl.utils.grasp_controller.minimize", side_effect=clipped_minimize):
+            with patch(
+                "ada_grasp_ctrl.utils.grasp_controller.minimize",
+                side_effect=clipped_minimize,
+            ) as minimize_mock:
                 result = controller._solve_control_problem(
                     solver_name="test",
                     stage=2,
@@ -337,7 +625,102 @@ class SharedControlProblemTest(unittest.TestCase):
         self.assertTrue(controller.solver_degraded)
         self.assertEqual(len(observed_warnings), 1)
         self.assertEqual(str(observed_warnings[0].message), "unexpected optimizer warning")
-        self.assertEqual(controller.r_data["solver_diagnostics"][-1]["bound_clipping_warning_count"], 1)
+        diagnostic = controller.r_data["solver_diagnostics"][-1]
+        self.assertEqual(diagnostic["bound_clipping_warning_count"], 1)
+        self.assertEqual(diagnostic["failure_policy"], "hold_current")
+        self.assertEqual(diagnostic["decision"], "hold_current")
+        self.assertTrue(diagnostic["action_applied"])
+        self.assertFalse(diagnostic["episode_aborted"])
+        self.assertEqual(
+            minimize_mock.call_args.kwargs["options"],
+            {"ftol": 1e-6, "disp": False, "maxiter": 200},
+        )
+
+    def test_shared_solver_applies_rejected_candidate_when_configured(self):
+        """Apply a finite rejected command without rewriting solver acceptance."""
+        controller = self._controller()
+        controller.r_data = {"solver_diagnostics": []}
+        controller.solver_degraded = False
+        controller.solver_failure_policy = "apply_candidate"
+        failed = SimpleNamespace(
+            x=np.array([0.4, 0.5, 9.0, 8.0, 7.0]),
+            success=False,
+            fun=1.0,
+            status=9,
+            message="iteration limit",
+            nit=200,
+        )
+
+        with patch("ada_grasp_ctrl.utils.grasp_controller.minimize", return_value=failed):
+            result = controller._solve_control_problem(
+                solver_name="control",
+                stage=2,
+                objective=lambda x: float(x @ x),
+                jacobian=lambda x: 2 * x,
+                constraints=[],
+                bounds=[(-1.0, 1.0)] * 2 + [(0.0, 10.0)] * 3,
+                initial_variables=np.zeros(5),
+                joint_limit_constraint=lambda x: np.ones(4),
+                current_qpos_a=np.array([0.2, -0.4]),
+                current_contact_forces=np.array([1.0, 0.1, -0.2]),
+                num_dof=2,
+                print_details=False,
+            )
+
+        np.testing.assert_allclose(result["q_a"], np.array([0.6, 0.1]), rtol=0, atol=1e-15)
+        np.testing.assert_array_equal(result["dq_a"], np.array([0.4, 0.5]))
+        np.testing.assert_array_equal(result["cf"], np.array([9.0, 8.0, 7.0]))
+        diagnostic = controller.r_data["solver_diagnostics"][-1]
+        self.assertFalse(diagnostic["accepted"])
+        self.assertTrue(diagnostic["candidate_applicable"])
+        self.assertEqual(diagnostic["decision"], "apply_candidate")
+        self.assertTrue(controller.solver_degraded)
+
+    def test_shared_solver_aborts_rejected_or_malformed_candidate(self):
+        """Raise the domain abort only after recording complete diagnostics."""
+        cases = (
+            ("fail_episode", np.zeros(5), True),
+            ("apply_candidate", None, False),
+        )
+        for policy, candidate, applicable in cases:
+            with self.subTest(policy=policy, candidate=repr(candidate)):
+                controller = self._controller()
+                controller.r_data = {"solver_diagnostics": []}
+                controller.solver_degraded = False
+                controller.solver_failure_policy = policy
+                result = SimpleNamespace(
+                    success=False,
+                    fun=1.0,
+                    status=9,
+                    message="failed",
+                    nit=200,
+                )
+                if candidate is not None:
+                    result.x = candidate
+
+                with patch("ada_grasp_ctrl.utils.grasp_controller.minimize", return_value=result):
+                    with self.assertRaises(ControlSolveEpisodeAbort):
+                        controller._solve_control_problem(
+                            solver_name="control",
+                            stage=1,
+                            objective=lambda x: float(x @ x),
+                            jacobian=lambda x: 2 * x,
+                            constraints=[],
+                            bounds=[(-1.0, 1.0)] * 2 + [(0.0, 10.0)] * 3,
+                            initial_variables=np.zeros(5),
+                            joint_limit_constraint=lambda x: np.ones(4),
+                            current_qpos_a=np.array([0.2, -0.4]),
+                            current_contact_forces=np.array([1.0, 0.1, -0.2]),
+                            num_dof=2,
+                            print_details=False,
+                        )
+
+                diagnostic = controller.r_data["solver_diagnostics"][-1]
+                self.assertEqual(diagnostic["candidate_applicable"], applicable)
+                self.assertEqual(diagnostic["decision"], "abort_episode")
+                self.assertFalse(diagnostic["action_applied"])
+                self.assertTrue(diagnostic["episode_aborted"])
+                self.assertTrue(controller.solver_degraded)
 
 
 if __name__ == "__main__":

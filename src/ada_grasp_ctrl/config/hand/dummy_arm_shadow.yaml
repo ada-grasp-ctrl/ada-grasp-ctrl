@@ -1,6 +1,8 @@
 xml_path: ${asset_root}/hand/dummy_arm_shadow/right_no_tendon.xml
 mocap: False
 dummy_arm: True
+controller:
+  final_sum_force: 15.0
 exclude_table_contact: 
 color: [0.863157, 0.0865002, 0.0802199, 1.0]
 finger_prefix: ['rh_ff', 'rh_mf', 'rh_rf', 'rh_lf', 'rh_th']

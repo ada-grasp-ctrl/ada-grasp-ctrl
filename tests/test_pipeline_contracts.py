@@ -21,11 +21,11 @@ from ada_grasp_ctrl.batch import (
     raise_for_batch_failures,
     write_batch_report,
 )
-from ada_grasp_ctrl.errors import BatchExecutionError
+from ada_grasp_ctrl.errors import BatchExecutionError, PreflightError
 from ada_grasp_ctrl.runtime import resolve_worker_count, sample_seed, seed_everything, seed_sample
 from ada_grasp_ctrl.schema import SchemaError, load_npy_record, validate_grasp_record
 from ada_grasp_ctrl.tasks import TASK_REGISTRY
-from ada_grasp_ctrl.tasks.control_eval import METHOD_REGISTRY
+from ada_grasp_ctrl.tasks.control_eval import METHOD_REGISTRY, _validate_control_preflight
 from ada_grasp_ctrl.tasks.control_stat import get_control_results
 from ada_grasp_ctrl.tasks.convert_format import BODex, Batched, Learning
 from ada_grasp_ctrl.utils.robots.base import RobotFactory
@@ -138,6 +138,45 @@ class PipelineContractTest(unittest.TestCase):
             capture_output=True,
             text=True,
             check=False,
+        )
+
+    def _control_preflight_config(self, hand_xml: Path, *, policy: str = "apply_candidate"):
+        """Build one fully populated direct-call control configuration.
+
+        Args:
+            hand_xml: Existing hand XML fixture.
+            policy: Command-solver rejection policy.
+
+        Returns:
+            Hydra-like configuration containing the public control defaults.
+        """
+        project_root = Path(__file__).resolve().parents[1]
+        task_defaults = OmegaConf.load(
+            project_root / "src" / "ada_grasp_ctrl" / "config" / "task" / "control_eval.yaml"
+        )
+        task = OmegaConf.to_container(task_defaults, resolve=False)
+        assert isinstance(task, dict)
+        task.update(
+            {
+                "method": "ours",
+                "input_data": "grasp_dir",
+                "offsets": [0.0],
+            }
+        )
+        control = task["control"]
+        assert isinstance(control, dict)
+        control["solver_failure_policy"] = policy
+        return OmegaConf.create(
+            {
+                "hand_name": "dummy_arm_shadow",
+                "hand": {
+                    "xml_path": str(hand_xml),
+                    "controller": {"final_sum_force": 15.0},
+                },
+                "setting": "tabletop",
+                "grasp_dir": str(self.root / "grasp"),
+                "task": task,
+            }
         )
 
     def test_learning_and_batched_write_v1_without_nested_batch_paths(self):
@@ -307,6 +346,36 @@ class PipelineContractTest(unittest.TestCase):
         parsed = json.loads((self.root / "report" / "run_report.json").read_text())
         self.assertEqual(parsed["num_processed"], 2)
 
+    def test_all_solver_failure_policies_remain_degraded_batch_failures(self):
+        """Keep apply, hold, and abort outcomes out of scientific completion."""
+        policies = ("apply_candidate", "hold_current", "fail_episode")
+        results = [
+            SampleResult(
+                f"{policy}.npy",
+                SampleStatus.SOLVER_DEGRADED,
+                details={"solver_failure_policy": policy},
+            )
+            for policy in policies
+        ]
+        summary = write_batch_report(
+            self.root / "solver-policy-report",
+            "control_eval",
+            results,
+            num_discovered=len(results),
+            num_skipped=0,
+        )
+
+        self.assertEqual(summary["num_solver_degraded"], 3)
+        self.assertEqual(summary["num_completed"], 0)
+        failure_lines = (self.root / "solver-policy-report" / "failures.jsonl").read_text().splitlines()
+        self.assertEqual(len(failure_lines), 3)
+        self.assertEqual(
+            {json.loads(line)["details"]["solver_failure_policy"] for line in failure_lines},
+            set(policies),
+        )
+        with self.assertRaises(BatchExecutionError):
+            raise_for_batch_failures(summary)
+
     def test_empty_statistics_are_null_and_have_zero_denominator(self):
         """Save defined integer counts and YAML null instead of division warnings/NaN."""
         configs = OmegaConf.create(
@@ -377,6 +446,45 @@ class PipelineContractTest(unittest.TestCase):
         self.assertEqual(statistics["success_rate_denominator"], 0)
         self.assertIsNone(statistics["success_rate"])
 
+    def test_solver_degraded_records_remain_outside_success_denominator(self):
+        """Exclude every policy's degraded record from success and failure."""
+        configs = OmegaConf.create(
+            {
+                "control_dir": str(self.root / "control"),
+                "hand_name": "dummy_arm_shadow",
+                "task": {
+                    "method": "ours",
+                    "ablation_name": "default",
+                    "setting_name": "dist_0",
+                    "lift_height": 0.2,
+                    "n_terminal_steps": 5,
+                },
+            }
+        )
+        indexed_data = [
+            (
+                index,
+                f"{policy}.npy",
+                {
+                    "episode_status": "solver_degraded",
+                    "obj_pose": [],
+                    "contacts": [],
+                    "solver_diagnostics": [{"failure_policy": policy}],
+                },
+                None,
+            )
+            for index, policy in enumerate(("apply_candidate", "hold_current", "fail_episode"))
+        ]
+
+        statistics, results, _ = get_control_results(indexed_data, configs)
+
+        self.assertEqual([result.status for result in results], [SampleStatus.SOLVER_DEGRADED] * 3)
+        self.assertEqual(statistics["solver_degraded"], 3)
+        self.assertEqual(statistics["success"], 0)
+        self.assertEqual(statistics["failure"], 0)
+        self.assertEqual(statistics["success_rate_denominator"], 0)
+        self.assertIsNone(statistics["success_rate"])
+
     def test_registries_workers_and_seed_are_explicit_and_reproducible(self):
         """Expose only public tasks/methods and reproduce NumPy samples."""
         self.assertEqual(
@@ -403,6 +511,76 @@ class PipelineContractTest(unittest.TestCase):
         with multiprocessing.Pool(processes=3) as pool:
             parallel = sorted(pool.imap_unordered(_seeded_worker, reversed(params)))
         self.assertEqual(serial, parallel)
+
+    def test_control_solver_failure_policy_defaults_and_preflight_validation(self):
+        """Accept the three public policies and reject unknown values before evaluation."""
+        project_root = Path(__file__).resolve().parents[1]
+        task_config = OmegaConf.load(project_root / "src" / "ada_grasp_ctrl" / "config" / "task" / "control_eval.yaml")
+        self.assertEqual(task_config.control.solver_failure_policy, "apply_candidate")
+
+        hand_xml = self.root / "hand.xml"
+        hand_xml.write_text("<mujoco/>", encoding="utf-8")
+        for policy in ("apply_candidate", "hold_current", "fail_episode"):
+            with self.subTest(policy=policy):
+                configs = self._control_preflight_config(hand_xml, policy=policy)
+                _validate_control_preflight(configs)
+
+        invalid = self._control_preflight_config(hand_xml, policy="unknown")
+        with self.assertRaisesRegex(PreflightError, "apply_candidate, hold_current, fail_episode"):
+            _validate_control_preflight(invalid)
+
+        process = self._run_cli(
+            "task=control_eval",
+            "hand=dummy_arm_shadow",
+            "task.control.solver_failure_policy=unknown",
+        )
+        self.assertEqual(process.returncode, 2, process.stderr)
+        combined_output = process.stdout + process.stderr
+        self.assertIn("Unsupported task.control.solver_failure_policy 'unknown'", combined_output)
+        self.assertNotIn("Traceback", combined_output)
+
+    def test_control_parameters_compose_per_hand_and_reject_invalid_values(self):
+        """Resolve per-hand targets and reject malformed scientific parameters before workers."""
+        project_root = Path(__file__).resolve().parents[1]
+        task_path = project_root / "src" / "ada_grasp_ctrl" / "config" / "task" / "control_eval.yaml"
+        hand_dir = project_root / "src" / "ada_grasp_ctrl" / "config" / "hand"
+        for hand_name, expected_force in (
+            ("dummy_arm_shadow", 15.0),
+            ("dummy_arm_allegro", 10.0),
+            ("dummy_arm_leap_tac3d", 8.0),
+        ):
+            with self.subTest(hand_name=hand_name):
+                composed = OmegaConf.create(
+                    {
+                        "hand": OmegaConf.to_container(OmegaConf.load(hand_dir / f"{hand_name}.yaml"), resolve=False),
+                        "task": OmegaConf.to_container(OmegaConf.load(task_path), resolve=False),
+                    }
+                )
+                self.assertEqual(composed.task.control.final_sum_force, expected_force)
+
+        hand_xml = self.root / "hand.xml"
+        hand_xml.write_text("<mujoco/>", encoding="utf-8")
+        invalid_cases = (
+            ("task.control.friction_cone_mu", -0.1, "friction_cone_mu must be greater than zero"),
+            (
+                "task.control.objective_weights.hand_base_pose",
+                [1.0, 2.0],
+                "hand_base_pose must contain exactly 6 numbers",
+            ),
+            (
+                "task.control.command_solver.normal_force_bounds",
+                [10.0, 1.0],
+                "normal_force_bounds\\[0\\] must be less than",
+            ),
+            ("task.control.wrench_balance.ftol", 0.0, "wrench_balance.ftol must be greater than zero"),
+            ("task.control.command_solver.maxiter", 0, "command_solver.maxiter must be a positive integer"),
+        )
+        for path, value, message in invalid_cases:
+            with self.subTest(path=path):
+                configs = self._control_preflight_config(hand_xml)
+                OmegaConf.update(configs, path, value)
+                with self.assertRaisesRegex(PreflightError, message):
+                    _validate_control_preflight(configs)
 
     def test_format_outputs_are_invariant_to_serial_parallel_and_auto_workers(self):
         """Compare real converter outputs and sample seeds across worker policies."""

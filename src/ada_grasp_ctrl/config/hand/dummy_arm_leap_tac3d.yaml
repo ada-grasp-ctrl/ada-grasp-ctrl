@@ -1,6 +1,8 @@
 xml_path: ${asset_root}/hand/dummy_arm_leap_tac3d/leap_tac3d.xml
 mocap: False
 dummy_arm: True
+controller:
+  final_sum_force: 8.0
 exclude_table_contact: null
 color: [0.132868, 0.496933, 0.144129, 1.0]
 finger_prefix: null

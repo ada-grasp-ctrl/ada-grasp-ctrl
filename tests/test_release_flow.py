@@ -76,6 +76,68 @@ class ReleaseFlowTest(unittest.TestCase):
             }
         )
 
+    def _run_example_with_recording_python(
+        self, *arguments: str
+    ) -> tuple[subprocess.CompletedProcess, list[list[str]]]:
+        """Run the example script with a Python stub that records stage arguments.
+
+        Args:
+            *arguments: Arguments passed after ``script/run_example.sh``.
+
+        Returns:
+            The completed shell process and one argument list per Python invocation.
+        """
+        invocation_log = self.root / "python-invocations.jsonl"
+        invocation_log.unlink(missing_ok=True)
+        python_stub = self.root / "record-python"
+        python_stub.write_text(
+            "#!/usr/bin/env python3\n"
+            "import json\n"
+            "import os\n"
+            "import sys\n"
+            "with open(os.environ['ADA_GRASP_CTRL_TEST_INVOCATIONS'], 'a', encoding='utf-8') as stream:\n"
+            "    stream.write(json.dumps(sys.argv[1:]) + '\\n')\n",
+            encoding="utf-8",
+        )
+        python_stub.chmod(0o755)
+        environment = os.environ.copy()
+        environment.update(
+            {
+                "ADA_GRASP_CTRL_EXAMPLE_BASE": str(self.root / "examples"),
+                "ADA_GRASP_CTRL_RUN_ID": "viewer-" + "-".join(argument.replace("--", "") for argument in arguments),
+                "ADA_GRASP_CTRL_TEST_INVOCATIONS": str(invocation_log),
+                "PYTHON_BIN": str(python_stub),
+            }
+        )
+
+        completed = subprocess.run(
+            ["bash", "script/run_example.sh", *arguments],
+            cwd=Path(__file__).resolve().parents[1],
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        invocations = []
+        if invocation_log.exists():
+            invocations = [json.loads(line) for line in invocation_log.read_text(encoding="utf-8").splitlines()]
+        return completed, invocations
+
+    @staticmethod
+    def _control_eval_invocation(invocations: list[list[str]]) -> list[str]:
+        """Select the recorded control-eval invocation.
+
+        Args:
+            invocations: Recorded Python argument lists.
+
+        Returns:
+            The single control-eval argument list.
+        """
+        matches = [arguments for arguments in invocations if "task=control_eval" in arguments]
+        if len(matches) != 1:
+            raise AssertionError(f"Expected one control_eval invocation, found {len(matches)}: {invocations}")
+        return matches[0]
+
     def test_control_stat_uses_only_reported_current_outputs(self) -> None:
         """Ignore an old file in control_dir when the current report is explicit."""
         control_root = self.root / "control"
@@ -244,6 +306,54 @@ class ReleaseFlowTest(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 2, completed.stderr)
         self.assertIn("already exists", completed.stderr)
+
+    def test_example_script_defaults_to_headless_viewing(self) -> None:
+        """Keep the existing two-argument quick command non-interactive."""
+        commands = (
+            ("shadow", "quick"),
+            ("shadow", "quick", "--viewer", "none"),
+        )
+        for arguments in commands:
+            with self.subTest(arguments=arguments):
+                completed, invocations = self._run_example_with_recording_python(*arguments)
+
+                self.assertEqual(completed.returncode, 0, completed.stderr)
+                control_eval = self._control_eval_invocation(invocations)
+                self.assertIn("task.debug_viewer=false", control_eval)
+                self.assertNotIn("task.debug_viewer_backend=mjviser", control_eval)
+
+    def test_example_script_passes_exact_mjviser_overrides_for_all_hands(self) -> None:
+        """Expose the browser viewer consistently for every quick fixture."""
+        for hand in ("shadow", "allegro", "leap_tac3d"):
+            with self.subTest(hand=hand):
+                completed, invocations = self._run_example_with_recording_python(
+                    hand,
+                    "quick",
+                    "--viewer",
+                    "mjviser",
+                )
+
+                self.assertEqual(completed.returncode, 0, completed.stderr)
+                control_eval = self._control_eval_invocation(invocations)
+                self.assertIn("task.debug_viewer=true", control_eval)
+                self.assertIn("task.debug_viewer_backend=mjviser", control_eval)
+                self.assertNotIn("task.debug_viewer=false", control_eval)
+
+    def test_example_script_rejects_malformed_viewer_arguments_before_pipeline(self) -> None:
+        """Return usage exit code 2 without invoking any task stage."""
+        invalid_arguments = (
+            ("shadow", "quick", "--viewer"),
+            ("shadow", "quick", "--view", "mjviser"),
+            ("shadow", "quick", "--viewer", "mujoco"),
+            ("shadow", "quick", "--viewer", "mjviser", "extra"),
+        )
+        for arguments in invalid_arguments:
+            with self.subTest(arguments=arguments):
+                completed, invocations = self._run_example_with_recording_python(*arguments)
+
+                self.assertEqual(completed.returncode, 2, completed.stderr)
+                self.assertIn("Usage: bash script/run_example.sh", completed.stderr)
+                self.assertEqual(invocations, [])
 
     def test_release_gate_refuses_a_nonempty_artifact_root(self) -> None:
         """Prevent a release comparison from consuming artifacts from an older run."""

@@ -2,125 +2,81 @@
 
 [Project website](https://ada-grasp-ctrl.github.io/)
 
-Ada Grasp Ctrl is the reference implementation of coordinated contact control for dexterous grasp execution. The maintained application is a reproducible four-stage pipeline:
-
 ```text
-raw grasp → format → dummy_arm_qpos → control_eval → control_stat
+raw grasp -> format -> dummy_arm_qpos -> control_eval -> control_stat
 ```
 
-The supported matrix is Shadow, Allegro, and LEAP Tac3D hands (plus their dummy-arm models), the `ours`, `op`, `bs1`, `bs2`, and `bs3` control methods, and BODex, Learning, and Batched input converters. Underactuated hands and the former `eval`, `stat`, `vobj`, `vusd`, and `collect` prototype tasks are not supported.
+Supported hands: Shadow, Allegro, and LEAP Tac3D. Supported controllers: `ours`, `op`, `bs1`, `bs2`, and `bs3`. Supported input converters: BODex, Learning, and Batched.
 
-![Diverse grasps](docs/sim_diverse_grasps.jpg)
+## Installation
 
-## Installation and preflight
-
-The maintained environment is Linux x86-64, Python 3.10, an NVIDIA GPU, and a driver compatible with CUDA 12.1. The headless control simulation itself uses MuJoCo on CPU; the full `dummy_arm_qpos` stage uses CUDA IK.
+The maintained environment is Linux x86-64 with Python 3.10. Quick control simulation runs on CPU; the complete pipeline requires an NVIDIA GPU compatible with CUDA 12.1 for `dummy_arm_qpos`.
 
 ```bash
 git clone --recurse-submodules https://github.com/ada-grasp-ctrl/ada-grasp-ctrl.git
 cd ada-grasp-ctrl
 conda env create -f environment.yml
 conda activate ada-grasp-ctrl
-
-python -c "import torch, mujoco, pinocchio, ada_grasp_ctrl; print(torch.__version__, torch.version.cuda)"
 ada-grasp-ctrl --help
 ```
 
-For an existing clone, synchronize the pinned submodules first:
+For an existing clone, initialize the pinned dependencies before creating or updating the environment:
 
 ```bash
 git submodule sync --recursive
-git submodule update --init --recursive --progress
+git submodule update --init --recursive
 ```
 
-`python src/main.py ...` remains a compatible wrapper around the installed `ada-grasp-ctrl` command. Invocation does not depend on the shell's current directory. Runtime paths use this precedence: explicit Hydra/CLI value, environment variable, then a source-checkout default.
+## Quick start
 
-The supported binary distribution is a code-only wheel with three explicit external roots:
-
-| Root | Environment variable | Purpose | Source-checkout default |
-|---|---|---|---|
-| `asset_root` | `ADA_GRASP_CTRL_ASSET_ROOT` | Hand MJCF, meshes, and robot files | `<checkout>/assets` |
-| `data_root` | `ADA_GRASP_CTRL_DATA_ROOT` | Raw inputs and relative object/scene paths stored in records | `<checkout>` |
-| `output_root` | `ADA_GRASP_CTRL_OUTPUT_ROOT` | Grasp, control, log, report, and statistics outputs | `<checkout>/output` |
-
-For example, a wheel can run outside the source tree with either CLI roots:
-
-```bash
-ada-grasp-ctrl task=control_eval hand=dummy_arm_shadow \
-  asset_root=/srv/ada-grasp/assets data_root=/srv/ada-grasp/data \
-  output_root=/srv/ada-grasp/output
-```
-
-or equivalent environment variables. Relative configured paths are anchored below the corresponding resolved root. `save_root` remains a compatibility alias for `output_root`; new automation should use `output_root`. An actual wheel task without the required external roots fails during preflight with exit code `2`; import and `--help` remain available.
-
-Pinocchio is intentionally installed as the conda-forge `pinocchio=3.0.0` package from `environment.yml`. PyPI does not publish the scientific baseline version under a compatible `pin==3.0.0`, so a pip-only runtime is not supported. `pytorch_kinematics` and `mr_utils` are installed from the recursively cloned, commit-pinned submodules:
-
-```text
-third_party/pytorch_kinematics @ 74de5a01bff2a3222b8174e6f8eb91db8756bfb3
-third_party/utils_python       @ 2d8dc1a5abf5899069f9ec73c13de73674f4c897
-```
-
-To verify wheel mode after creating the maintained conda environment, build wheels for the two source dependencies and this package, install them into the target environment, then configure external roots:
-
-```bash
-python -m pip wheel --no-deps --no-build-isolation \
-  third_party/pytorch_kinematics third_party/utils_python . -w /tmp/ada-grasp-wheels
-python -m pip install --no-deps --force-reinstall /tmp/ada-grasp-wheels/*.whl
-ADA_GRASP_CTRL_ASSET_ROOT="$PWD/assets" \
-ADA_GRASP_CTRL_DATA_ROOT="$PWD" \
-ADA_GRASP_CTRL_OUTPUT_ROOT=/tmp/ada-grasp-output \
-  ada-grasp-ctrl --help
-```
-
-## 60-second quick start
-
-The repository contains a minimal DGN bottle object and one precomputed dummy-arm grasp for each supported hand. Quick mode runs `control_eval → control_stat` headlessly. Every invocation gets a unique output directory below `output/examples/<hand>/<UTC-run-id>`, so reports and statistics cannot consume an older run:
+Run the bundled Shadow example headlessly:
 
 ```bash
 bash script/run_example.sh shadow quick
+```
+
+Quick mode uses a precomputed dummy-arm grasp and runs `control_eval -> control_stat`. The other supported hands use the same command:
+
+```bash
 bash script/run_example.sh allegro quick
 bash script/run_example.sh leap_tac3d quick
 ```
 
-Set `ADA_GRASP_CTRL_RUN_ID` to a safe, previously unused identifier for reproducible automation, or `ADA_GRASP_CTRL_EXAMPLE_BASE` to relocate the per-run directories. The script refuses an existing run directory and prints the exact final path. `control_stat` receives the current `control_eval/run_report.json` through `task.input_report`; it does not scan unrelated results. A missing output, inconsistent statistics, or report-generation failure contributes to the script's final exit code.
-
-The historical wrapper names invoke the same quick mode:
+To watch the Shadow example in a browser:
 
 ```bash
-bash script/test_learning_dummy_arm_shadow.sh
-bash script/test_learning_dummy_arm_allegro.sh
-bash script/test_learning_dummy_arm_leap_tac3d.sh
+bash script/run_example.sh shadow quick --viewer mjviser
 ```
 
-Full mode starts from the included raw Learning fixture, formats it, runs CUDA IK, then evaluates and summarizes it:
+Open the URL printed by mjviser. On a remote server, use the SSH forwarding command printed beside it.
+
+To run all four stages from the bundled raw Learning fixture:
 
 ```bash
 bash script/run_example.sh shadow full
 ```
 
-At completion the script prints the output directory, episode status, lift result, statistics file, and success-rate denominator. Exit code `1` means all possible samples were processed but at least one execution error or solver degradation occurred; inspect the reports described below.
+Each example uses a new directory under `output/examples/<hand>/` and prints the final output path and result summary.
 
-The bundled data is not relicensed by the source MIT License. Its source and verified checksums are recorded in [the object attribution](examples/assets/object/core_bottle_15787789482f045d8add95bf56d3d2fa/ATTRIBUTION.md). The maintainer has stated that redistribution was authorized, but the authorizing party, date, scope, and primary message/ticket are not present in this repository; public release remains legally blocked until that record is completed.
+## Complete pipeline
 
-## Complete four-stage pipeline
+Run the following commands from the repository root. Use the same `exp_name` and `output_root` across all stages.
 
-### 1. Convert raw grasps
+### 1. Format raw grasps
 
 ```bash
 ada-grasp-ctrl setting=tabletop hand=shadow task=format exp_name=learn \
-  task.data_name=Learning task.max_num=100 task.data_path=<RAW_GRASP_DIRECTORY>
+  task.data_name=Learning task.data_path=/path/to/raw_grasps task.max_num=-1
 ```
 
-`task.data_name` is one of `BODex`, `Learning`, or `Batched`. `task.max_num<=0` processes all inputs. An empty raw input is a preflight error. New outputs include `schema_version: 1`; legacy files without a version continue to load as v0.
+Set `task.data_name` to `BODex`, `Learning`, or `Batched`. A negative `task.max_num` processes all inputs.
 
 ### 2. Calculate dummy-arm qpos
 
 ```bash
 ada-grasp-ctrl setting=tabletop hand=shadow task=dummy_arm_qpos exp_name=learn \
-  task.max_num=-1 task.device=cuda:0
+  task.device=cuda:0 task.max_num=-1
 ```
-
-The six-DoF dummy arm maps a sampled hand base pose to simulation joints. Outputs are generated below the explicit `dummy_arm_grasp_dir`; the implementation never derives paths by replacing hand-name substrings.
 
 ### 3. Evaluate a controller
 
@@ -130,25 +86,7 @@ ada-grasp-ctrl setting=tabletop hand=dummy_arm_shadow task=control_eval exp_name
   task.debug_viewer=false
 ```
 
-`task.method` accepts `ours`, `op`, `bs1`, `bs2`, or `bs3`. `ours` and `bs2` share one implementation; BS2's only policy difference is disabling dummy-arm motion in Stage 1. Paper hyperparameters, friction coefficients, controller objectives, and lift threshold are unchanged. The corrected wrench-balance gradient and rejected-solver fallback can intentionally change trajectories that depended on the former invalid derivative or an infeasible solution.
-
-For native interactive visualization:
-
-```bash
-ada-grasp-ctrl setting=tabletop hand=dummy_arm_shadow task=control_eval exp_name=learn \
-  task.method=ours task.debug_viewer=true task.debug_viewer_backend=mujoco
-```
-
-For a persistent browser viewer on a headless server:
-
-```bash
-ada-grasp-ctrl setting=tabletop hand=dummy_arm_shadow task=control_eval exp_name=learn \
-  task.method=ours task.debug_viewer=true task.debug_viewer_backend=mjviser \
-  task.mjviser.host=127.0.0.1 task.mjviser.port=8080
-ssh -L 8080:127.0.0.1:8080 <server>
-```
-
-Use the actual URL printed by mjviser if the preferred port was occupied.
+Set `task.method` to `ours`, `op`, `bs1`, `bs2`, or `bs3`. For browser visualization, set `task.debug_viewer=true task.debug_viewer_backend=mjviser`.
 
 ### 4. Compute statistics
 
@@ -157,122 +95,35 @@ ada-grasp-ctrl setting=tabletop hand=dummy_arm_shadow task=control_stat exp_name
   task.method=ours task.setting_name=dist_0
 ```
 
-The historical YAML keys remain available. New counts distinguish `success`, `failure`, `invalid_initialization`, `solver_degraded`, and `execution_error`. The primary success-rate denominator is `success + failure`; invalid initialization and solver degradation are excluded. Empty or all-invalid result sets use YAML `null` for undefined rates and continuous metrics, never NaN.
+Use the matching hand name at each stage:
 
-## Data schemas and diagnostics
+| Format and IK | Control and statistics |
+|---|---|
+| `shadow` | `dummy_arm_shadow` |
+| `allegro` | `dummy_arm_allegro` |
+| `leap_tac3d` | `dummy_arm_leap_tac3d` |
 
-A formatted grasp record requires:
+## Outputs and status
 
-- `obj_path`, `obj_scale`, and a seven-value WXYZ `obj_pose`;
-- one-dimensional, equally sized `pregrasp_qpos`, `grasp_qpos`, and `squeeze_qpos`;
-- optional `joint_names`, whose length must equal qpos length;
-- `schema_version: 1` for new files.
+Outputs default to `<checkout>/output`; override them with `output_root=/path/to/output`.
 
-A control record keeps the historical trajectories (`obj_pose`, `dof`, `doa`, `contacts`, and planned/optimization fields) and adds `schema_version`, `episode_status`, and `solver_diagnostics`. A rejected SLSQP result is never applied: that control step holds the previous qpos, zeros delta/history, continues the episode, marks it `solver_degraded`, and causes the completed batch to exit `1`.
+Each task log directory contains:
 
-Every task log directory contains:
+- `run_manifest.yaml`: resolved configuration and runtime information.
+- `run_report.json`: structured per-input results.
+- `failures.jsonl`: execution errors and solver-degraded records, when present.
 
-- `run_manifest.yaml`: resolved config, final absolute roots, seed, workers, git state (or explicit unavailable values in wheel mode), dependencies including the Pinocchio module-version fallback, actual module import origins, hardware, and sorted inputs;
-- `run_report.json`: totals and one structured result per input;
-- `failures.jsonl`: execution-error and solver-degraded records with messages and tracebacks.
+Exit codes are:
 
-Process exit codes are stable:
+- `0`: execution completed without execution errors or solver degradation.
+- `1`: processing completed, but at least one execution error or solver-degraded episode occurred.
+- `2`: configuration, input, asset, environment, or viewer preflight failed.
 
-- `0`: program execution succeeded; scientifically invalid initializations may exist;
-- `1`: all possible samples finished, with an execution error or solver degradation;
-- `2`: configuration, input, assets, environment, or viewer preflight failed.
+## References and license
 
-With `skip=true`, a batch in which every expected output already exists is a successful no-op and still writes reports.
+- [Implementation notes](docs/practical-modifications-in-implementation.md)
+- [Golden release evidence](release/golden/README.md)
+- [Example object attribution](examples/assets/object/core_bottle_15787789482f045d8add95bf56d3d2fa/ATTRIBUTION.md)
+- [Hand asset audit](assets/hand/README.md)
 
-## Full datasets and release benchmark
-
-For BODex/DGN evaluation, download `DGN_2k_processed.zip` from the [BODex dataset](https://huggingface.co/datasets/JiayiChenPKU/BODex) and arrange it as documented by that dataset. The maintained release gate uses three hands × five methods on one fixed sample plus 100 `ours` episodes per hand. Historical release classifications are:
-
-| Hand | Success | Failure | Invalid initialization |
-|---|---:|---:|---:|
-| Shadow | 75 | 4 | 21 |
-| Allegro | 80 | 6 | 14 |
-| LEAP Tac3D | 88 | 5 | 7 |
-
-After correcting the normal derivative at `fx=0` and rejecting infeasible SLSQP results, the intermediate corrected baseline was:
-
-| Hand | Success | Failure | Invalid initialization | Solver degraded |
-|---|---:|---:|---:|---:|
-| Shadow | 68 | 5 | 21 | 6 |
-| Allegro | 80 | 5 | 14 | 1 |
-| LEAP Tac3D | 88 | 5 | 7 | 0 |
-
-The current promoted baseline also sorts collision meshes before MuJoCo geom declaration and uses diagnosed direct linear solves instead of `inv(A) @ B`, making trajectories independent of filesystem directory iteration order while avoiding explicit matrix inversion:
-
-| Hand | Success | Failure | Invalid initialization | Solver degraded | Execution error |
-|---|---:|---:|---:|---:|---:|
-| Shadow | 69 | 4 | 21 | 6 | 0 |
-| Allegro | 80 | 5 | 14 | 1 | 0 |
-| LEAP Tac3D | 88 | 5 | 7 | 0 | 0 |
-
-All invalid-initialization and solver-degraded classifications are unchanged. The seven degraded episodes previously consumed infeasible/nonconverged solutions; two borderline episodes changed scientific outcome under the corrected derivative (one Shadow success became failure, while one Allegro failure became success). Stable mesh declaration then changed one Shadow sample from failure to success. Direct solve changed 248/300 closed-loop trajectories because last-bit linear-algebra differences are amplified by contact dynamics, but changed no classifications. Two independent 300-episode runs reproduced every promoted trajectory and classification within the strict tolerances below.
-
-The three-hand × five-method fixed matrix uses a strict golden comparison: timing and approved additive metadata are ignored, while keys, shapes, stages, contact order, classifications, and floating trajectories must match (`rtol=1e-5`, `atol=1e-6`). The checked-in [golden evidence](release/golden/README.md) contains the 15 raw trajectories plus a machine-readable audit of both 15-case and 300-case repeat runs, input/output checksums, run manifests, and old-to-new differences. Verify the checked-in evidence with:
-
-```bash
-PYTHONPATH=src python script/audit_golden.py verify release/golden/artifact.json
-```
-
-The executable release driver uses a unique temporary root by default, refuses a non-empty configured root, and rejects an empty golden baseline. Portable gates cover all three quick examples, the 15-case fixed matrix, and isolated wheel mode:
-
-```bash
-PYTHON_BIN=python bash script/run_release_gate.sh portable
-```
-
-The 300-case gate requires the external release input tree recorded by the artifact:
-
-```bash
-ADA_GRASP_CTRL_RELEASE_INPUT_ROOT=/path/to/release-inputs \
-  PYTHON_BIN=python bash script/run_release_gate.sh release300
-```
-
-`workflow_dispatch` in `.github/workflows/release.yml` exposes the same `quick`, `fixed`, `wheel`, `portable`, `release300`, and `all` gates. The 300-case job runs on a self-hosted runner because the full dataset is not redistributed by this repository.
-
-These gates verify technical reproducibility; they do not grant redistribution rights. The unresolved object authorization record and LEAP Tac3D provenance are listed in the [object attribution](examples/assets/object/core_bottle_15787789482f045d8add95bf56d3d2fa/ATTRIBUTION.md) and [hand asset audit](assets/hand/README.md).
-
-One single-process Shadow `ours` episode on the pinned environment gives the following implementation benchmark. These one-run values are a release sanity check, not a hardware-independent performance guarantee.
-
-| Metric | Pre-refactor | Refactored |
-|---|---:|---:|
-| Wall time | 5.41 s | 4.60 s |
-| Recorded solver time | 1.154 s | 1.175 s |
-| Peak RSS | 637 MiB | 483 MiB |
-
-The incremental phase-4 direct-solve benchmark compared the immediately preceding optimization refactor with the final implementation on the same fixed Shadow episode: wall time changed from 5.71 s to 5.60 s, peak RSS from 483,972 KiB to 482,808 KiB, and aggregate fixed-matrix optimization time from 6.712 s to 6.804 s (+1.37%).
-
-## Static grasp visualization
-
-The visualizer accepts paths on the command line and can open a window or export a scene:
-
-```bash
-PYTHONPATH=src python script/quick_grasp_vis/vis_dexlearn_grasp.py \
-  --hand shadow --grasp examples/data/shadow/formatted/grasp.npy \
-  --object-root examples/assets/object/core_bottle_15787789482f045d8add95bf56d3d2fa \
-  --export /tmp/shadow_grasp.glb
-```
-
-## Extending the application
-
-- A new converter must validate its raw schema, write the common v1 grasp schema, and be registered in `CONVERTER_REGISTRY`.
-- A new controller implements or configures an episode policy and is registered in `METHOD_REGISTRY`; dynamic `eval(...)` dispatch is intentionally prohibited.
-- A new hand must define robot/MJCF metadata, qpos/joint-order tests, converter fixtures, headless integration coverage, and a release golden before it becomes public.
-
-## Development
-
-```bash
-PYTHONPATH=src MPLCONFIGDIR=/tmp/ada_grasp_ctrl_mpl python -m unittest discover -s tests -v
-python -m compileall -q src tests
-ruff check src tests script
-ruff format --check src tests script
-```
-
-CI runs Python 3.10 lint/format checks, unit/schema/CLI tests, and a precomputed Shadow headless smoke test. GPU full examples and release golden suites remain release gates.
-
-## License and acknowledgements
-
-Ada Grasp Ctrl source is licensed under the [MIT License](LICENSE), copyright 2026 Ada Grasp Ctrl Authors. Third-party submodules and example data retain their own licenses and attribution. The evaluation codebase builds upon [DexGraspBench](https://github.com/JYChen18/DexGraspBench); the example object comes from DGN/BODex as attributed above. See the [hand asset audit](assets/hand/README.md) for runtime reachability, upstream license references, unresolved provenance, and retained deletion candidates.
+Project source is licensed under the [MIT License](LICENSE). Third-party submodules, hand assets, and bundled data retain their own licenses and attribution. The example-object authorization record and local LEAP Tac3D mesh provenance remain unresolved for public redistribution; see the linked audits.

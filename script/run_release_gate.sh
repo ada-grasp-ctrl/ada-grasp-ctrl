@@ -181,6 +181,7 @@ run_release300_gate() {
       save_dir="${hand_root}" grasp_dir="${grasp_root}" \
       control_dir="${hand_root}/control" log_dir="${hand_root}/log/control_eval" \
       task.method=ours task.input_data=grasp_dir task.max_num=-1 \
+      task.control.solver_failure_policy=hold_current \
       task.debug_viewer=false task.debug_render=false
     run_batch_gate run_cli \
       setting=tabletop hand="dummy_arm_${hand}" task=control_stat \

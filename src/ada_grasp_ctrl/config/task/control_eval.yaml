@@ -14,40 +14,74 @@ simulation_metrics:
   max_force: 1.0
 
 arm_pregrasp_is_grasp: true
-method: "op" # "op" or "ours"
+method: "ours" # Control method: ours, op, bs1, bs2, or bs3.
 input_data: "grasp_dir"
 
 graspdata:
-  pregrasp_t: 2 # >0
-  squeeze_t: 0 # >0
+  pregrasp_t: 2 # Extra pregrasp extrapolation; larger values open the hand farther.
+  squeeze_t: 0 # Extra squeeze extrapolation; zero keeps the stored squeeze pose.
 
 # evaluation setting
-offsets: [0.0] # unit: m; 0.00 or 0.02
+offsets: [0.0] # Planar object-position offsets in metres; nonzero values use eight directions.
 
 # params of our controller
 control:
-  ablation_name: "default"
+  ablation_name: "default" # Controller ablation variant.
+  solver_failure_policy: apply_candidate # Rejected-solve action: apply_candidate, hold_current, or fail_episode.
 
-  Ke_scalar: 1e5
-  stage1_force_thres: 0.2
-  tan_motion_pen_weight: 1e3
+  Ke_scalar: 1e5 # Isotropic contact stiffness.
+  stage1_force_thres: 0.2 # Minimum Stage-1 target total normal force.
+  tan_motion_pen_weight: 1e3 # Tangential contact-motion penalty weight.
+  balance_thres: 0.2 # Enter Stage 2 below this wrench-balance metric.
+  friction_cone_mu: 0.3 # Coulomb friction coefficient used by the controller.
+  final_sum_force: ${hand.controller.final_sum_force} # Hand-specific target total normal force.
 
-  free_stage_switch: true
-  stage2_after_full_path: true
-  desired_sum_force_as_traj: true
-  use_desired_sum_force_ub: true
+  kp_clip: # Bounds applied to actuator position gains.
+    min: 0.0 # Minimum clipped gain.
+    max: 1e3 # Maximum clipped gain.
 
-  stage2_incontact_force_only: true
-  stage2_penalize_tan_motion: false
-  balance_use_normalized: true
-  stage2_Ks_hand_only: true
+  objective_weights: # Quadratic control-objective weights.
+    hand_base_pose: [0.0, 0.0, 100.0, 10.0, 10.0, 10.0] # Base-pose weights: x, y, z, rx, ry, rz.
+    hand_joint_position: 1.0 # Hand joint-position tracking weight.
+    joint_velocity: 0.01 # Joint-velocity penalty weight.
+    joint_acceleration: 0.001 # Joint-acceleration penalty weight.
+    coordinated_tangential_force: 0.1 # Coordinated tangential force-model error weight.
+    equal_contact_force: 1.0 # Equal-contact desired-force tracking weight.
+    control_wrench: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0] # Residual-wrench weights: Fx, Fy, Fz, Tx, Ty, Tz.
+    equal_joint_force: 0.01 # Normal-force-induced joint-torque penalty weight.
+    in_contact_joint_velocity_multiplier: 100.0 # Velocity-weight multiplier for contacting joints.
 
-  stage2_tan_force_constraint: false
-  stage2_ctrl_tan_force: true
+  wrench_balance: # Stage-transition wrench-balance solver settings.
+    normal_force_sum: 1.0 # Fixed total normal force for the balance check.
+    wrench_weights: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0] # Wrench weights: Fx, Fy, Fz, Tx, Ty, Tz.
+    normal_force_bounds: [0.0, 10.0] # Per-contact normal-force bounds.
+    tangential_force_bounds: [-10.0, 10.0] # Per-contact tangential-force bounds.
+    ftol: 1e-6 # SLSQP convergence tolerance.
+    maxiter: 200 # Maximum SLSQP iterations.
 
-  stage2_increase_force: false
-  stage2_equal_joint_force_cost: true
+  command_solver: # Command-producing SLSQP settings.
+    normal_force_bounds: [0.0, 100.0] # Per-contact normal-force bounds.
+    tangential_force_bounds: [-50.0, 50.0] # Per-contact tangential-force bounds.
+    ftol: 1e-6 # SLSQP convergence tolerance.
+    maxiter: 200 # Maximum SLSQP iterations.
 
-  use_multi_contact_model: true
-  stage2_penalize_contact_qda: true
-  jaco_reference_frame: true
+  free_stage_switch: true # Allow Stage 2 to switch back to Stage 1.
+  stage2_after_full_path: true # Force Stage 2 after the planned path ends.
+  desired_sum_force_as_traj: true # Accumulate the Stage-2 target force as a trajectory.
+  use_desired_sum_force_ub: true # Cap the target at final_sum_force + 0.2.
+
+  stage2_incontact_force_only: true # Disable position tracking for contacting hand joints.
+  stage2_penalize_tan_motion: false # Penalize tangential contact motion in Stage 2.
+  balance_use_normalized: true # Compare the normalized wrench-balance metric.
+  stage2_Ks_hand_only: true # Build Stage-2 contact stiffness from hand joints only.
+
+  stage1_tan_force_constraint: true # Enforce the full Stage-1 contact-force model.
+  stage2_tan_force_constraint: false # Enforce the full Stage-2 contact-force model.
+  stage2_ctrl_tan_force: true # Penalize Stage-2 tangential force-model error.
+
+  stage2_increase_force: false # Require nonnegative predicted normal-force increments.
+  stage2_equal_joint_force_cost: true # Penalize normal-force-induced hand joint torques.
+
+  use_multi_contact_model: true # Couple all contacts in the stiffness model.
+  stage2_penalize_contact_qda: true # Increase velocity penalties for contacting joints in Stage 2.
+  jaco_reference_frame: true # Align Jacobians to a common contact reference frame.

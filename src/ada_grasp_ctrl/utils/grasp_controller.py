@@ -20,7 +20,10 @@ if TYPE_CHECKING:
     from .robot_adaptor import RobotAdaptor
     from .robots.base import ArmHand
 from ada_grasp_ctrl.schema import with_current_schema
+from ada_grasp_ctrl.errors import ControlSolveEpisodeAbort
 from ada_grasp_ctrl.optimization import (
+    DEFAULT_SOLVER_FAILURE_POLICY,
+    SOLVER_FAILURE_POLICIES,
     diagnose_slsqp_result,
     friction_cone_jacobian,
     friction_cone_slack,
@@ -64,6 +67,271 @@ class _ControlProblemDefinition:
     joint_limit_constraint: Callable[[np.ndarray], np.ndarray]
 
 
+@dataclass(frozen=True)
+class _ObjectiveWeights:
+    """Hydra-managed weights used to assemble dimension-dependent objectives."""
+
+    hand_base_pose: tuple[float, ...]
+    hand_joint_position: float
+    joint_velocity: float
+    joint_acceleration: float
+    coordinated_tangential_force: float
+    equal_contact_force: float
+    control_wrench: tuple[float, ...]
+    equal_joint_force: float
+    in_contact_joint_velocity_multiplier: float
+
+
+@dataclass(frozen=True)
+class _WrenchBalanceParameters:
+    """Hydra-managed wrench-balance optimization parameters."""
+
+    normal_force_sum: float
+    wrench_weights: tuple[float, ...]
+    normal_force_bounds: tuple[float, float]
+    tangential_force_bounds: tuple[float, float]
+    ftol: float
+    maxiter: int
+
+
+@dataclass(frozen=True)
+class _CommandSolverParameters:
+    """Hydra-managed command-producing SLSQP parameters."""
+
+    normal_force_bounds: tuple[float, float]
+    tangential_force_bounds: tuple[float, float]
+    ftol: float
+    maxiter: int
+
+
+@dataclass(frozen=True)
+class GraspControllerParameters:
+    """Validated controller parameters parsed from ``task.control`` Hydra config."""
+
+    balance_thres: float
+    friction_cone_mu: float
+    final_sum_force: float
+    kp_clip_min: float
+    kp_clip_max: float
+    objective_weights: _ObjectiveWeights
+    wrench_balance: _WrenchBalanceParameters
+    command_solver: _CommandSolverParameters
+
+    @classmethod
+    def from_config(cls, configs: Any) -> GraspControllerParameters:
+        """Parse and validate the configurable controller contract.
+
+        Args:
+            configs: Hydra ``task.control`` configuration.
+
+        Returns:
+            Immutable validated controller parameters.
+
+        Raises:
+            ValueError: If a field is missing, nonfinite, malformed, or outside
+                its valid range.
+        """
+        if configs is None:
+            raise ValueError("task.control configuration is required")
+
+        kp_clip_min = _finite_float(_config_value(configs, "kp_clip.min"), "kp_clip.min", nonnegative=True)
+        kp_clip_max = _finite_float(_config_value(configs, "kp_clip.max"), "kp_clip.max", nonnegative=True)
+        if kp_clip_min >= kp_clip_max:
+            raise ValueError("task.control.kp_clip.min must be less than task.control.kp_clip.max")
+
+        objective_weights = _ObjectiveWeights(
+            hand_base_pose=_float_tuple(
+                _config_value(configs, "objective_weights.hand_base_pose"),
+                "objective_weights.hand_base_pose",
+                length=6,
+                nonnegative=True,
+            ),
+            hand_joint_position=_finite_float(
+                _config_value(configs, "objective_weights.hand_joint_position"),
+                "objective_weights.hand_joint_position",
+                nonnegative=True,
+            ),
+            joint_velocity=_finite_float(
+                _config_value(configs, "objective_weights.joint_velocity"),
+                "objective_weights.joint_velocity",
+                nonnegative=True,
+            ),
+            joint_acceleration=_finite_float(
+                _config_value(configs, "objective_weights.joint_acceleration"),
+                "objective_weights.joint_acceleration",
+                nonnegative=True,
+            ),
+            coordinated_tangential_force=_finite_float(
+                _config_value(configs, "objective_weights.coordinated_tangential_force"),
+                "objective_weights.coordinated_tangential_force",
+                nonnegative=True,
+            ),
+            equal_contact_force=_finite_float(
+                _config_value(configs, "objective_weights.equal_contact_force"),
+                "objective_weights.equal_contact_force",
+                nonnegative=True,
+            ),
+            control_wrench=_float_tuple(
+                _config_value(configs, "objective_weights.control_wrench"),
+                "objective_weights.control_wrench",
+                length=6,
+                nonnegative=True,
+            ),
+            equal_joint_force=_finite_float(
+                _config_value(configs, "objective_weights.equal_joint_force"),
+                "objective_weights.equal_joint_force",
+                nonnegative=True,
+            ),
+            in_contact_joint_velocity_multiplier=_finite_float(
+                _config_value(configs, "objective_weights.in_contact_joint_velocity_multiplier"),
+                "objective_weights.in_contact_joint_velocity_multiplier",
+                nonnegative=True,
+            ),
+        )
+        wrench_balance = _WrenchBalanceParameters(
+            normal_force_sum=_finite_float(
+                _config_value(configs, "wrench_balance.normal_force_sum"),
+                "wrench_balance.normal_force_sum",
+                positive=True,
+            ),
+            wrench_weights=_float_tuple(
+                _config_value(configs, "wrench_balance.wrench_weights"),
+                "wrench_balance.wrench_weights",
+                length=6,
+                nonnegative=True,
+            ),
+            normal_force_bounds=_bounds(
+                _config_value(configs, "wrench_balance.normal_force_bounds"),
+                "wrench_balance.normal_force_bounds",
+                nonnegative_lower=True,
+            ),
+            tangential_force_bounds=_bounds(
+                _config_value(configs, "wrench_balance.tangential_force_bounds"),
+                "wrench_balance.tangential_force_bounds",
+            ),
+            ftol=_finite_float(
+                _config_value(configs, "wrench_balance.ftol"),
+                "wrench_balance.ftol",
+                positive=True,
+            ),
+            maxiter=_positive_int(
+                _config_value(configs, "wrench_balance.maxiter"),
+                "wrench_balance.maxiter",
+            ),
+        )
+        command_solver = _CommandSolverParameters(
+            normal_force_bounds=_bounds(
+                _config_value(configs, "command_solver.normal_force_bounds"),
+                "command_solver.normal_force_bounds",
+                nonnegative_lower=True,
+            ),
+            tangential_force_bounds=_bounds(
+                _config_value(configs, "command_solver.tangential_force_bounds"),
+                "command_solver.tangential_force_bounds",
+            ),
+            ftol=_finite_float(
+                _config_value(configs, "command_solver.ftol"),
+                "command_solver.ftol",
+                positive=True,
+            ),
+            maxiter=_positive_int(
+                _config_value(configs, "command_solver.maxiter"),
+                "command_solver.maxiter",
+            ),
+        )
+        return cls(
+            balance_thres=_finite_float(
+                _config_value(configs, "balance_thres"),
+                "balance_thres",
+                nonnegative=True,
+            ),
+            friction_cone_mu=_finite_float(
+                _config_value(configs, "friction_cone_mu"),
+                "friction_cone_mu",
+                positive=True,
+            ),
+            final_sum_force=_finite_float(
+                _config_value(configs, "final_sum_force"),
+                "final_sum_force",
+                positive=True,
+            ),
+            kp_clip_min=kp_clip_min,
+            kp_clip_max=kp_clip_max,
+            objective_weights=objective_weights,
+            wrench_balance=wrench_balance,
+            command_solver=command_solver,
+        )
+
+
+def _config_value(configs: Any, path: str) -> Any:
+    """Read one required dotted field from a mapping-like Hydra config."""
+    current = configs
+    for field_name in path.split("."):
+        try:
+            current = current[field_name]
+        except Exception as error:
+            raise ValueError(f"Missing or unresolved task.control.{path}") from error
+    return current
+
+
+def _finite_float(value: Any, path: str, *, positive: bool = False, nonnegative: bool = False) -> float:
+    """Convert one configuration scalar to a validated finite float."""
+    try:
+        converted = float(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"task.control.{path} must be a finite number") from error
+    if not np.isfinite(converted):
+        raise ValueError(f"task.control.{path} must be a finite number")
+    if positive and converted <= 0:
+        raise ValueError(f"task.control.{path} must be greater than zero")
+    if nonnegative and converted < 0:
+        raise ValueError(f"task.control.{path} must be nonnegative")
+    return converted
+
+
+def _float_tuple(
+    value: Any,
+    path: str,
+    *,
+    length: int,
+    nonnegative: bool = False,
+) -> tuple[float, ...]:
+    """Convert one fixed-length configuration sequence to finite floats."""
+    if isinstance(value, (str, bytes)):
+        raise ValueError(f"task.control.{path} must contain exactly {length} numbers")
+    try:
+        items = tuple(value)
+    except TypeError as error:
+        raise ValueError(f"task.control.{path} must contain exactly {length} numbers") from error
+    if len(items) != length:
+        raise ValueError(f"task.control.{path} must contain exactly {length} numbers")
+    return tuple(_finite_float(item, f"{path}[{index}]", nonnegative=nonnegative) for index, item in enumerate(items))
+
+
+def _bounds(value: Any, path: str, *, nonnegative_lower: bool = False) -> tuple[float, float]:
+    """Validate one lower/upper bound pair."""
+    lower, upper = _float_tuple(value, path, length=2)
+    if lower >= upper:
+        raise ValueError(f"task.control.{path}[0] must be less than task.control.{path}[1]")
+    if nonnegative_lower and lower < 0:
+        raise ValueError(f"task.control.{path}[0] must be nonnegative")
+    return lower, upper
+
+
+def _positive_int(value: Any, path: str) -> int:
+    """Validate one strictly positive integer configuration field."""
+    if isinstance(value, bool):
+        raise ValueError(f"task.control.{path} must be a positive integer")
+    try:
+        converted = int(value)
+        numeric = float(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"task.control.{path} must be a positive integer") from error
+    if converted <= 0 or not np.isfinite(numeric) or numeric != converted:
+        raise ValueError(f"task.control.{path} must be a positive integer")
+    return converted
+
+
 class GraspController:
     def __init__(self, configs, robot: ArmHand, robot_adaptor: RobotAdaptor):
         self.robot = robot
@@ -85,9 +353,18 @@ class GraspController:
             "solver_diagnostics": [],
         }
         self.solver_degraded = False
+        self.solver_failure_policy = DEFAULT_SOLVER_FAILURE_POLICY
+        self.parameters: GraspControllerParameters | None = None
 
         # hyper-parameters
-        if configs:
+        if configs is not None:
+            self.parameters = GraspControllerParameters.from_config(configs)
+            self.solver_failure_policy = str(configs.get("solver_failure_policy", DEFAULT_SOLVER_FAILURE_POLICY))
+            if self.solver_failure_policy not in SOLVER_FAILURE_POLICIES:
+                supported = ", ".join(SOLVER_FAILURE_POLICIES)
+                raise ValueError(
+                    f"Unsupported solver failure policy '{self.solver_failure_policy}'. Supported values: {supported}."
+                )
             self.stage2_incontact_force_only = configs.stage2_incontact_force_only
             self.stage2_Ks_hand_only = configs.stage2_Ks_hand_only
             self.stage2_penalize_tan_motion = configs.stage2_penalize_tan_motion
@@ -97,13 +374,23 @@ class GraspController:
 
             self.stage2_ctrl_tan_force = configs.stage2_ctrl_tan_force
             self.stage2_tan_force_constraint = configs.stage2_tan_force_constraint
+            self.stage1_tan_force_constraint = configs.get(
+                "stage1_tan_force_constraint",
+                self.stage2_tan_force_constraint,
+            )
 
             self.stage2_increase_force = configs.stage2_increase_force
 
             self.Ke_scalar = configs.Ke_scalar
             self.stage1_force_thres = configs.stage1_force_thres
 
-            self.Kp = np.diag(np.clip(self.robot.doa_kp, 0, 1e3))
+            self.Kp = np.diag(
+                np.clip(
+                    self.robot.doa_kp,
+                    self.parameters.kp_clip_min,
+                    self.parameters.kp_clip_max,
+                )
+            )
             self.Kp_inv = self._solve_linear_system(
                 self.Kp,
                 np.eye(self.Kp.shape[0]),
@@ -115,17 +402,22 @@ class GraspController:
             self.use_multi_contact_model = configs.use_multi_contact_model
             self.stage2_penalize_contact_qda = configs.stage2_penalize_contact_qda
             self.jaco_reference_frame = configs.jaco_reference_frame
+            self.balance_thres = self.parameters.balance_thres
+            self.mu = self.parameters.friction_cone_mu
+            self.final_sum_force = self.parameters.final_sum_force
 
-        self.balance_thres = 0.2
-        self.mu = 0.3  # friction coef
-        if "shadow" in self.robot.name:
-            self.final_sum_force = 15.0
-        elif "allegro" in self.robot.name:
-            self.final_sum_force = 10.0
-        elif "leap" in self.robot.name:
-            self.final_sum_force = 8.0
-        else:
-            raise NotImplementedError()
+    def _require_parameters(self) -> GraspControllerParameters:
+        """Return configured parameters for methods unavailable in statistics-only mode.
+
+        Returns:
+            Validated controller parameters.
+
+        Raises:
+            RuntimeError: If the controller was created without ``task.control``.
+        """
+        if self.parameters is None:
+            raise RuntimeError("Controller optimization requires task.control configuration")
+        return self.parameters
 
     def _record_solver_diagnostic(self, solver_name, diagnostics, stage=None):
         """Append one solver diagnostic and latch episode degradation.
@@ -366,6 +658,7 @@ class GraspController:
         return wrench
 
     def check_wrench_balance(self, grasp_matrix, b_print_opt_details=False):
+        controller_parameters = self._require_parameters()
         if grasp_matrix is None:
             return 1.0, None
 
@@ -375,10 +668,10 @@ class GraspController:
         if n_con < 2:  # only one contact cannot be in wrench balance
             return 1.0, None
 
-        # weights
-        w_wrench = np.eye(6)
+        parameters = controller_parameters.wrench_balance
+        w_wrench = np.diag(parameters.wrench_weights)
         mu = self.mu
-        gamma = 1.0
+        gamma = parameters.normal_force_sum
 
         def objective(x):
             cf = x.copy()
@@ -410,7 +703,12 @@ class GraspController:
             dict(type="eq", fun=force_magnitude_constraint, jac=force_magnitude_constraint_grad),
         ]
 
-        bounds = [(0, 10), (-10, 10), (-10, 10)] * n_con
+        bounds = [
+            parameters.normal_force_bounds,
+            parameters.tangential_force_bounds,
+            parameters.tangential_force_bounds,
+        ]
+        bounds *= n_con
 
         res = minimize(
             fun=objective,
@@ -419,7 +717,11 @@ class GraspController:
             x0=np.zeros((3 * n_con)),
             bounds=bounds,
             method="SLSQP",
-            options={"ftol": 1e-6, "disp": b_print_opt_details, "maxiter": 200},
+            options={
+                "ftol": parameters.ftol,
+                "disp": b_print_opt_details,
+                "maxiter": parameters.maxiter,
+            },
         )
 
         diagnostics = diagnose_slsqp_result(res, constraints_list, bounds)
@@ -539,8 +841,12 @@ class GraspController:
             print_details: Whether SciPy prints solver progress.
 
         Returns:
-            Accepted or safely held actuator, delta, and contact-force vectors.
+            Policy-selected actuator, delta, and contact-force vectors.
+
+        Raises:
+            ControlSolveEpisodeAbort: If the selected policy aborts this offset.
         """
+        solver_parameters = self._require_parameters().command_solver
         with warnings.catch_warnings(record=True) as caught_warnings:
             warnings.simplefilter("always")
             result = minimize(
@@ -550,7 +856,11 @@ class GraspController:
                 x0=initial_variables,
                 bounds=bounds,
                 method="SLSQP",
-                options={"ftol": 1e-6, "disp": print_details, "maxiter": 200},
+                options={
+                    "ftol": solver_parameters.ftol,
+                    "disp": print_details,
+                    "maxiter": solver_parameters.maxiter,
+                },
             )
         bound_clipping_warning_count = 0
         for warning_message in caught_warnings:
@@ -575,15 +885,34 @@ class GraspController:
             joint_limit_constraint=joint_limit_constraint,
         )
         diagnostics["bound_clipping_warning_count"] = bound_clipping_warning_count
-        self._record_solver_diagnostic(solver_name, diagnostics, stage=stage)
-        qpos_a, delta_qpos_a, contact_forces = select_control_solution(
+        failure_policy = getattr(self, "solver_failure_policy", DEFAULT_SOLVER_FAILURE_POLICY)
+        decision = select_control_solution(
             current_qpos_a,
             current_contact_forces,
-            result.x,
+            getattr(result, "x", None),
             num_dof,
             diagnostics,
+            failure_policy=failure_policy,
         )
-        return {"q_a": qpos_a, "dq_a": delta_qpos_a, "cf": contact_forces}
+        diagnostics.update(
+            {
+                "failure_policy": failure_policy,
+                "decision": decision.decision,
+                "action_applied": decision.action_applied,
+                "episode_aborted": decision.episode_aborted,
+            }
+        )
+        self._record_solver_diagnostic(solver_name, diagnostics, stage=stage)
+        if decision.episode_aborted:
+            raise ControlSolveEpisodeAbort(
+                f"Command solver '{solver_name}' was rejected at stage {stage}; "
+                f"policy '{failure_policy}' selected episode abort."
+            )
+        return {
+            "q_a": decision.qpos,
+            "dq_a": decision.delta_qpos,
+            "cf": decision.contact_forces,
+        }
 
     def _build_control_problem(
         self,
@@ -643,16 +972,22 @@ class GraspController:
         if coordinated and n_con:
             contact_grasp_matrix = self.compute_grasp_matrix(contacts) if grasp_matrix is None else grasp_matrix
 
-        w_hb_pose = np.diag([0, 0, 100.0, 10.0, 10.0, 10.0])
-        w_q_hand = np.eye(n_hand_dof)
-        w_dqa = 0.01 * np.eye(n_dof)
-        w_ddqa = np.diag([0.001] * n_dof)
+        controller_parameters = self._require_parameters()
+        weights = controller_parameters.objective_weights
+        w_hb_pose = np.diag(weights.hand_base_pose)
+        w_q_hand = weights.hand_joint_position * np.eye(n_hand_dof)
+        w_dqa = weights.joint_velocity * np.eye(n_dof)
+        w_ddqa = weights.joint_acceleration * np.eye(n_dof)
         single_contact_motion_weight = np.diag([0.0, self.tan_motion_pen_weight, self.tan_motion_pen_weight])
         w_cp = block_diag(*[single_contact_motion_weight for _ in range(n_con)])
-        single_contact_force_weight = np.diag([0.0, 0.1, 0.1]) if coordinated else np.eye(3)
+        single_contact_force_weight = (
+            np.diag([0.0, weights.coordinated_tangential_force, weights.coordinated_tangential_force])
+            if coordinated
+            else weights.equal_contact_force * np.eye(3)
+        )
         w_cf = block_diag(*[single_contact_force_weight for _ in range(n_con)])
-        w_wrench = np.eye(6)
-        w_equal_joint_force = 0.01 * np.eye(n_hand_dof)
+        w_wrench = np.diag(weights.control_wrench)
+        w_equal_joint_force = weights.equal_joint_force * np.eye(n_hand_dof)
 
         if stage == 2 and n_con:
             in_contact_q_indices = contact_jaco_all.any(axis=0)
@@ -660,7 +995,7 @@ class GraspController:
             if self.stage2_incontact_force_only:
                 w_q_hand[in_contact_qh_indices, in_contact_qh_indices] = 0
             if self.stage2_penalize_contact_qda:
-                w_dqa[in_contact_q_indices, in_contact_q_indices] *= 100
+                w_dqa[in_contact_q_indices, in_contact_q_indices] *= weights.in_contact_joint_velocity_multiplier
 
         def objective(x: np.ndarray) -> float:
             """Evaluate the common objective plus policy-specific force costs.
@@ -792,7 +1127,12 @@ class GraspController:
                 gradient[:n_dof] += grad_hb_pose.reshape(-1)
             return gradient
 
-        full_contact_model = not coordinated or self.stage2_tan_force_constraint
+        if not coordinated:
+            full_contact_model = True
+        elif stage == 1:
+            full_contact_model = self.stage1_tan_force_constraint
+        else:
+            full_contact_model = self.stage2_tan_force_constraint
 
         def contact_model_constraint(x: np.ndarray) -> np.ndarray:
             """Match optimized forces to the linearized contact stiffness model.
@@ -1015,7 +1355,12 @@ class GraspController:
                         )
 
         bounds_dq = [(-limit, limit) for limit in context.max_delta_qpos]
-        bounds_cf = [(0, 100), (-50, 50), (-50, 50)] * n_con
+        solver_parameters = controller_parameters.command_solver
+        bounds_cf = [
+            solver_parameters.normal_force_bounds,
+            solver_parameters.tangential_force_bounds,
+            solver_parameters.tangential_force_bounds,
+        ] * n_con
         return _ControlProblemDefinition(
             objective=objective,
             jacobian=jacobian,
@@ -1063,7 +1408,10 @@ class GraspController:
             print_details: Whether SciPy prints solver progress.
 
         Returns:
-            Accepted or safely held actuator, delta, and contact-force vectors.
+            Policy-selected actuator, delta, and contact-force vectors.
+
+        Raises:
+            ControlSolveEpisodeAbort: If the selected policy aborts this offset.
         """
         context = self._prepare_control_problem(
             stage=stage,
@@ -1132,7 +1480,10 @@ class GraspController:
             b_print_opt_details: Whether SciPy prints solver progress.
 
         Returns:
-            Accepted or safely held actuator, delta, and contact-force vectors.
+            Policy-selected actuator, delta, and contact-force vectors.
+
+        Raises:
+            ControlSolveEpisodeAbort: If the selected policy aborts this offset.
         """
         return self._optimize_control(
             policy="coordinated",
@@ -1181,7 +1532,10 @@ class GraspController:
             b_print_opt_details: Whether SciPy prints solver progress.
 
         Returns:
-            Accepted or safely held actuator, delta, and contact-force vectors.
+            Policy-selected actuator, delta, and contact-force vectors.
+
+        Raises:
+            ControlSolveEpisodeAbort: If the selected policy aborts this offset.
         """
         return self._optimize_control(
             policy="equal_contact",

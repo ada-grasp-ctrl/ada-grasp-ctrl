@@ -1,10 +1,12 @@
 import os
 from copy import deepcopy
+import logging
 
 import numpy as np
 import imageio
 
 from ada_grasp_ctrl.batch import SampleStatus
+from ada_grasp_ctrl.errors import ControlSolveEpisodeAbort
 from ada_grasp_ctrl.paths import map_path, resolve_from_root
 from ada_grasp_ctrl.schema import load_npy_record, validate_grasp_record
 from ada_grasp_ctrl.utils.rot_util import (
@@ -207,6 +209,7 @@ class BaseEval:
         invalid_initialization = (
             ho_dist < -eval_config.max_pene or hh_dist < -eval_config.max_pene or contact_force > eval_config.max_force
         )
+        episode_aborted = False
         if invalid_initialization:
             if self.configs.task.debug_viewer or self.configs.task.debug_render:
                 print(
@@ -227,24 +230,33 @@ class BaseEval:
             self.sim_step_per_action = int(sim_step_per_action)
 
             # Detailed simulation methods for testing
-            self._simulate_under_extforce_details(pregrasp_qpos, grasp_qpos, squeeze_qpos)
+            try:
+                self._simulate_under_extforce_details(pregrasp_qpos, grasp_qpos, squeeze_qpos)
+            except ControlSolveEpisodeAbort as error:
+                episode_aborted = True
+                logging.warning("Aborted control episode %s: %s", file_suffix, error)
 
-            # Lift the object
-            curr_qpos_a = self.mj_ho.get_qpos_a()
-            lift_qpos_a = curr_qpos_a.copy()
-            lift_qpos_a[2] += lift_height  # lift, by IK
-            path = self.grasp_ctrl.interplote_qpos(curr_qpos_a, lift_qpos_a, step=2 * self.ctrl_freq)
-            for q_a in path:
+            if not episode_aborted:
+                # Lift the object
                 curr_qpos_a = self.mj_ho.get_qpos_a()
-                obj_pose = self.mj_ho.get_obj_pose()  # pos + quat(w,x,y,z)
-                self.grasp_ctrl.r_data["obj_pose"].append(obj_pose)
-                self.mj_ho.ctrl_qpos_a_with_interp(
-                    curr_qpos_a, q_a, names=self.robot.doa_names, step_outer=self.sim_step_per_action // 5, step_inner=5
-                )
+                lift_qpos_a = curr_qpos_a.copy()
+                lift_qpos_a[2] += lift_height  # lift, by IK
+                path = self.grasp_ctrl.interplote_qpos(curr_qpos_a, lift_qpos_a, step=2 * self.ctrl_freq)
+                for q_a in path:
+                    curr_qpos_a = self.mj_ho.get_qpos_a()
+                    obj_pose = self.mj_ho.get_obj_pose()  # pos + quat(w,x,y,z)
+                    self.grasp_ctrl.r_data["obj_pose"].append(obj_pose)
+                    self.mj_ho.ctrl_qpos_a_with_interp(
+                        curr_qpos_a,
+                        q_a,
+                        names=self.robot.doa_names,
+                        step_outer=self.sim_step_per_action // 5,
+                        step_inner=5,
+                    )
 
-            # terminal state
-            obj_pose = self.mj_ho.get_obj_pose()
-            self.grasp_ctrl.r_data["obj_pose"].append(obj_pose)
+                # terminal state
+                obj_pose = self.mj_ho.get_obj_pose()
+                self.grasp_ctrl.r_data["obj_pose"].append(obj_pose)
 
         if invalid_initialization:
             status = SampleStatus.INVALID_INITIALIZATION

@@ -17,6 +17,7 @@ from ada_grasp_ctrl.batch import (
     write_batch_report,
 )
 from ada_grasp_ctrl.errors import PreflightError
+from ada_grasp_ctrl.optimization import DEFAULT_SOLVER_FAILURE_POLICY, SOLVER_FAILURE_POLICIES
 from ada_grasp_ctrl.paths import resolve_from_root
 from ada_grasp_ctrl.runtime import activate_runtime_roots, seed_sample, write_run_manifest
 from ada_grasp_ctrl.schema import SchemaError, load_npy_record, validate_grasp_record
@@ -26,6 +27,7 @@ from ada_grasp_ctrl.tasks.control_eval_func.tabletop_dummy_arm_bs2 import tablet
 from ada_grasp_ctrl.tasks.control_eval_func.tabletop_dummy_arm_bs3 import tabletopDummyArmBS3Eval
 from ada_grasp_ctrl.tasks.control_eval_func.tabletop_dummy_arm_op import tabletopDummyArmOpEval
 from ada_grasp_ctrl.tasks.control_eval_func.tabletop_dummy_arm_ours import tabletopDummyArmOursEval
+from ada_grasp_ctrl.utils.grasp_controller import GraspControllerParameters
 from ada_grasp_ctrl.utils.viewer_session import DebugViewerError, create_debug_viewer_session
 
 
@@ -140,6 +142,16 @@ def _validate_control_preflight(configs: Any) -> None:
         raise PreflightError(f"task.input_data refers to unknown config field '{configs.task.input_data}'.")
     if not list(configs.task.offsets):
         raise PreflightError("task.offsets must contain at least one perturbation distance.")
+    failure_policy = str(configs.task.control.get("solver_failure_policy", DEFAULT_SOLVER_FAILURE_POLICY))
+    if failure_policy not in SOLVER_FAILURE_POLICIES:
+        supported = ", ".join(SOLVER_FAILURE_POLICIES)
+        raise PreflightError(
+            f"Unsupported task.control.solver_failure_policy '{failure_policy}'. Supported values: {supported}."
+        )
+    try:
+        GraspControllerParameters.from_config(configs.task.control)
+    except ValueError as error:
+        raise PreflightError(f"Invalid task.control configuration: {error}.") from error
 
 
 def _validate_object_assets(input_paths: list[str], configs: Any) -> None:

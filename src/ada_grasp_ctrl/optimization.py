@@ -3,9 +3,59 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Literal
 
 import numpy as np
+
+
+SolverFailurePolicy = Literal["apply_candidate", "hold_current", "fail_episode"]
+ControlSolutionDecisionName = Literal["apply_accepted", "apply_candidate", "hold_current", "abort_episode"]
+DEFAULT_SOLVER_FAILURE_POLICY: SolverFailurePolicy = "apply_candidate"
+SOLVER_FAILURE_POLICIES: tuple[SolverFailurePolicy, ...] = (
+    "apply_candidate",
+    "hold_current",
+    "fail_episode",
+)
+
+
+@dataclass(frozen=True)
+class ControlSolutionDecision:
+    """Policy decision for one diagnosed command-producing solver result.
+
+    Args:
+        qpos: Next actuator target, or ``None`` when the episode must abort.
+        delta_qpos: Applied actuator delta/history, or ``None`` on abort.
+        contact_forces: Candidate or preserved forces, or ``None`` on abort.
+        decision: Stable diagnostic decision identifier.
+        action_applied: Whether an actuator command should be sent.
+        episode_aborted: Whether the current offset episode must stop.
+    """
+
+    qpos: np.ndarray | None
+    delta_qpos: np.ndarray | None
+    contact_forces: np.ndarray | None
+    decision: ControlSolutionDecisionName
+    action_applied: bool
+    episode_aborted: bool
+
+
+def _solver_candidate(candidate: Any, expected_dimension: int) -> tuple[np.ndarray, bool]:
+    """Normalize an optimizer candidate defensively.
+
+    Args:
+        candidate: Raw optimizer candidate value.
+        expected_dimension: Required flattened candidate dimension.
+
+    Returns:
+        Normalized candidate and whether it is runtime-applicable.
+    """
+    try:
+        variables = np.asarray(candidate, dtype=float).reshape(-1)
+    except (OverflowError, TypeError, ValueError):
+        return np.asarray([], dtype=float), False
+    applicable = bool(variables.size == expected_dimension and np.all(np.isfinite(variables)))
+    return variables, applicable
 
 
 def solve_linear_system(
@@ -197,7 +247,7 @@ def diagnose_slsqp_result(
     inequality_tolerance: float = 1e-5,
     bound_tolerance: float = 1e-8,
 ) -> dict[str, Any]:
-    """Validate a SciPy SLSQP result before its command can be applied.
+    """Diagnose a SciPy SLSQP result before the configured policy acts.
 
     Args:
         result: SciPy-like object with ``x``, ``success``, and solver metadata.
@@ -211,14 +261,14 @@ def diagnose_slsqp_result(
     Returns:
         JSON/NumPy-serializable diagnostic dictionary containing ``accepted``.
     """
-    try:
-        variables = np.asarray(result.x, dtype=float).reshape(-1)
-    except Exception:
-        variables = np.asarray([], dtype=float)
+    variables, candidate_applicable = _solver_candidate(getattr(result, "x", None), len(bounds))
     objective = getattr(result, "fun", np.nan)
-    objective_finite = np.asarray(objective).size == 1 and np.isfinite(objective).all()
-    variables_finite = variables.size == len(bounds) and np.all(np.isfinite(variables))
-    if variables_finite:
+    try:
+        objective_array = np.asarray(objective, dtype=float)
+        objective_finite = objective_array.size == 1 and np.isfinite(objective_array).all()
+    except (OverflowError, TypeError, ValueError):
+        objective_finite = False
+    if candidate_applicable:
         equality_residual, inequality_slack, constraints_finite = _constraint_values(constraints, variables)
         bound_violation = _bound_violation(variables, bounds)
     else:
@@ -226,7 +276,7 @@ def diagnose_slsqp_result(
         bound_violation = np.inf
 
     joint_limit_violation = 0.0
-    if joint_limit_constraint is not None and variables_finite:
+    if joint_limit_constraint is not None and candidate_applicable:
         try:
             joint_slack = np.asarray(joint_limit_constraint(variables), dtype=float).reshape(-1)
             if not np.all(np.isfinite(joint_slack)):
@@ -236,7 +286,7 @@ def diagnose_slsqp_result(
         except Exception:
             joint_limit_violation = np.inf
 
-    finite = bool(variables_finite and objective_finite and constraints_finite)
+    finite = bool(candidate_applicable and objective_finite and constraints_finite)
     accepted = bool(
         getattr(result, "success", False)
         and finite
@@ -251,8 +301,9 @@ def diagnose_slsqp_result(
         "status": int(getattr(result, "status", -1)),
         "message": str(getattr(result, "message", "")),
         "nit": int(getattr(result, "nit", -1)),
-        "fun": float(objective) if objective_finite else None,
+        "fun": float(objective_array.reshape(-1)[0]) if objective_finite else None,
         "finite": finite,
+        "candidate_applicable": candidate_applicable,
         "max_equality_residual": float(equality_residual),
         "min_inequality_slack": (None if np.isposinf(inequality_slack) else float(inequality_slack)),
         "bound_violation": float(bound_violation),
@@ -263,28 +314,69 @@ def diagnose_slsqp_result(
 def select_control_solution(
     current_qpos: np.ndarray,
     current_contact_forces: np.ndarray,
-    candidate: np.ndarray,
+    candidate: Any,
     command_dimension: int,
     diagnostics: dict[str, Any],
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Apply an accepted candidate or return the hold-last safe fallback.
+    *,
+    failure_policy: SolverFailurePolicy = DEFAULT_SOLVER_FAILURE_POLICY,
+) -> ControlSolutionDecision:
+    """Select an action or episode abort from one diagnosed solver result.
 
     Args:
         current_qpos: Currently commanded actuated positions.
         current_contact_forces: Measured local contact forces.
-        candidate: Solver vector containing delta-q followed by forces.
+        candidate: Solver vector containing delta-q followed by forces, if available.
         command_dimension: Number of leading delta-q variables.
         diagnostics: Result from :func:`diagnose_slsqp_result`.
+        failure_policy: Configured rejected-result behavior.
 
     Returns:
-        Next qpos, applied delta-q, and accepted/preserved contact forces.
+        Structured actuator/history/abort decision.
+
+    Raises:
+        ValueError: If ``failure_policy`` is unsupported or dimensions are invalid.
     """
+    if failure_policy not in SOLVER_FAILURE_POLICIES:
+        supported = ", ".join(SOLVER_FAILURE_POLICIES)
+        raise ValueError(f"Unsupported solver failure policy '{failure_policy}'. Supported values: {supported}.")
+    if command_dimension < 0:
+        raise ValueError(f"command_dimension must be nonnegative, got {command_dimension}")
     current = np.asarray(current_qpos, dtype=float).reshape(-1)
     measured_forces = np.asarray(current_contact_forces, dtype=float).reshape(-1)
+    if current.size != command_dimension:
+        raise ValueError(f"current_qpos must contain {command_dimension} values, got {current.size}")
+    variables, candidate_applicable = _solver_candidate(candidate, command_dimension + measured_forces.size)
     if diagnostics["accepted"]:
-        variables = np.asarray(candidate, dtype=float).reshape(-1)
+        if not candidate_applicable:
+            return ControlSolutionDecision(None, None, None, "abort_episode", False, True)
         delta = variables[:command_dimension].copy()
-        return current + delta, delta, variables[command_dimension:].copy()
-    # A rejected solution never reaches MuJoCo. Zeroing both delta and history
-    # makes the following acceleration penalty start from the held command.
-    return current.copy(), np.zeros(command_dimension), measured_forces.copy()
+        return ControlSolutionDecision(
+            current + delta,
+            delta,
+            variables[command_dimension:].copy(),
+            "apply_accepted",
+            True,
+            False,
+        )
+    if failure_policy == "apply_candidate" and candidate_applicable:
+        delta = variables[:command_dimension].copy()
+        return ControlSolutionDecision(
+            current + delta,
+            delta,
+            variables[command_dimension:].copy(),
+            "apply_candidate",
+            True,
+            False,
+        )
+    if failure_policy == "hold_current":
+        # Zeroing delta/history makes the following acceleration penalty start
+        # from the deliberately held command.
+        return ControlSolutionDecision(
+            current.copy(),
+            np.zeros(command_dimension),
+            measured_forces.copy(),
+            "hold_current",
+            True,
+            False,
+        )
+    return ControlSolutionDecision(None, None, None, "abort_episode", False, True)

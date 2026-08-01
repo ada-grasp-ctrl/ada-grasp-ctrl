@@ -5,14 +5,48 @@ project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 hand="${1:-shadow}"
 mode="${2:-quick}"
 python_bin="${PYTHON_BIN:-python}"
+viewer="none"
+
+usage() {
+  cat >&2 <<'EOF'
+Usage: bash script/run_example.sh <shadow|allegro|leap_tac3d> <quick|full> [--viewer <none|mjviser>]
+
+Examples:
+  bash script/run_example.sh shadow quick
+  bash script/run_example.sh shadow quick --viewer mjviser
+EOF
+}
+
+if (( $# > 4 )); then
+  echo "Too many arguments." >&2
+  usage
+  exit 2
+fi
+if (( $# == 3 )); then
+  echo "Missing viewer value after '${3}'." >&2
+  usage
+  exit 2
+fi
+if (( $# == 4 )); then
+  if [[ "${3}" != "--viewer" ]]; then
+    echo "Unsupported option '${3}'." >&2
+    usage
+    exit 2
+  fi
+  viewer="${4}"
+fi
 
 case "${hand}" in
   shadow|allegro|leap_tac3d) ;;
-  *) echo "Unsupported hand '${hand}'. Use shadow, allegro, or leap_tac3d." >&2; exit 2 ;;
+  *) echo "Unsupported hand '${hand}'. Use shadow, allegro, or leap_tac3d." >&2; usage; exit 2 ;;
 esac
 case "${mode}" in
   quick|full) ;;
-  *) echo "Unsupported mode '${mode}'. Use quick or full." >&2; exit 2 ;;
+  *) echo "Unsupported mode '${mode}'. Use quick or full." >&2; usage; exit 2 ;;
+esac
+case "${viewer}" in
+  none|mjviser) ;;
+  *) echo "Unsupported viewer '${viewer}'. Use none or mjviser." >&2; usage; exit 2 ;;
 esac
 
 if ! command -v "${python_bin}" >/dev/null 2>&1; then
@@ -47,6 +81,11 @@ if [[ ! -f "${object_info}" ]]; then
 fi
 
 overall_status=0
+viewer_overrides=(task.debug_viewer=false)
+if [[ "${viewer}" == "mjviser" ]]; then
+  viewer_overrides=(task.debug_viewer=true task.debug_viewer_backend=mjviser)
+fi
+
 run_stage() {
   local stage_name="$1"
   shift
@@ -83,7 +122,7 @@ run_stage control_eval "${python_bin}" src/main.py \
   n_worker=1 output_root="${example_root}" save_dir="${example_root}" grasp_dir="${control_input}" \
   control_dir="${example_root}/control" log_dir="${example_root}/log/control_eval" \
   task.method=ours task.input_data=grasp_dir task.max_num=-1 \
-  task.debug_viewer=false task.debug_render=false
+  "${viewer_overrides[@]}" task.debug_render=false
 if (( overall_status == 2 )); then exit 2; fi
 
 run_stage control_stat "${python_bin}" src/main.py \
