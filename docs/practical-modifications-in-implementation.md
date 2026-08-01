@@ -124,7 +124,7 @@ model for improved conditioning and robustness. The MuJoCo plant retains the ori
 effective stiffness used by the predictive controller is
 
 $$
-\boldsymbol K_{p,\mathrm{eff}} = \operatorname{clip}(\boldsymbol K_p, 0, 10^3).
+\boldsymbol K_{p,\mathrm{eff}} = \mathrm{clip}(\boldsymbol K_p, 0, 10^3).
 $$
 
 For the dummy arm, this clips the three translational stiffness values from `10000` to `1000`; rotational and hand
