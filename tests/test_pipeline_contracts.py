@@ -512,6 +512,22 @@ class PipelineContractTest(unittest.TestCase):
             parallel = sorted(pool.imap_unordered(_seeded_worker, reversed(params)))
         self.assertEqual(serial, parallel)
 
+    def test_source_script_is_the_only_declared_command_entry_point(self):
+        """Keep public invocation on Python without installing a console command."""
+        project_root = Path(__file__).resolve().parents[1]
+        pyproject = (project_root / "pyproject.toml").read_text(encoding="utf-8")
+        self.assertNotIn("[project.scripts]", pyproject)
+        self.assertNotIn('ada-grasp-ctrl = "ada_grasp_ctrl.cli:main"', pyproject)
+
+        from ada_grasp_ctrl import cli
+
+        with self.assertRaisesRegex(SystemExit, "console command has been removed"):
+            cli.main()
+
+        process = self._run_cli("--help")
+        self.assertEqual(process.returncode, 0, process.stderr)
+        self.assertIn("dummy_arm_qpos", process.stdout)
+
     def test_control_solver_failure_policy_defaults_and_preflight_validation(self):
         """Accept the three public policies and reject unknown values before evaluation."""
         project_root = Path(__file__).resolve().parents[1]

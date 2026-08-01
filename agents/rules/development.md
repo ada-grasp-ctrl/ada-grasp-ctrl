@@ -6,7 +6,7 @@ Apply this rule to general source, CLI, Hydra configuration, refactoring, and fe
 
 - Preserve the public four-stage workflow and supported matrix unless the maintainer explicitly approves a scope change.
 - Keep task dispatch in `TASK_REGISTRY`, control-method dispatch in `METHOD_REGISTRY`, and converter dispatch in `CONVERTER_REGISTRY`. Do not use string-based `eval(...)` dispatch.
-- Keep `ada-grasp-ctrl` independent of the shell working directory. Resolve runtime files through the root/path helpers, not fixed `Path(__file__).parents[...]` assumptions.
+- Keep `python src/main.py` independent of the shell working directory. Resolve runtime files through the root/path helpers, not fixed `Path(__file__).parents[...]` assumptions.
 - Separate task-level preflight failures from sample-level execution failures. Configuration, environment, viewer startup, and shared-asset failures must fail before batch work; one malformed sample must remain attributable to that sample when the rest of the batch can continue safely.
 - Preserve backward-compatible reads for legacy records and configuration aliases unless a breaking change is explicitly approved.
 - Use Python 3.10-compatible syntax. Follow the repository's 120-column Ruff/Black configuration.
@@ -26,4 +26,3 @@ Apply this rule to general source, CLI, Hydra configuration, refactoring, and fe
 
 - Read [../knowledge/architecture.md](../knowledge/architecture.md) when locating ownership, tracing the pipeline, or adding a task, converter, controller, or hand.
 - Also read `data-runtime.md`, `control-simulation.md`, or `testing-release.md` when the change crosses those domains.
-

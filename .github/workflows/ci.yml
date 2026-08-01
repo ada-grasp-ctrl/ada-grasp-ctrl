@@ -31,7 +31,7 @@ jobs:
         run: |
           python -m compileall -q src tests
           python -m unittest discover -s tests -v
-          ada-grasp-ctrl --help
+          python src/main.py --help
       - name: Shadow headless smoke
         env:
           MPLCONFIGDIR: /tmp/ada_grasp_ctrl_mpl

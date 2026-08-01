@@ -3,7 +3,7 @@
 - Object ID: `core_bottle_15787789482f045d8add95bf56d3d2fa`
 - Source collection: DGN 2k, distributed through the [BODex dataset](https://huggingface.co/datasets/JiayiChenPKU/BODex)
 - Project page: <https://pku-epic.github.io/BODex/>
-- Maintainer assertion: the project plan states that redistribution authorization was obtained for this minimal subset. It is data, not Ada Grasp Ctrl source code, and is not relicensed under the repository MIT License.
+- Maintainer assertion: the project plan states that redistribution authorization was obtained for this minimal subset. It is data, not Ada Grasp Ctrl source code, and is not covered by a project-wide Ada Grasp Ctrl license.
 - Included purpose: the collision meshes, visualization mesh, and mass metadata needed by the public one-object example.
 
 ## Authorization evidence status

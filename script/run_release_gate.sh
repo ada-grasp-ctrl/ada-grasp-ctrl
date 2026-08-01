@@ -91,9 +91,11 @@ run_wheel_gate() {
   local wheel_venv="${wheel_root}/venv"
   local wheel_output="${wheel_root}/output"
   local wheel_cwd="${wheel_root}/arbitrary-cwd"
+  local wheel_main="${wheel_root}/main.py"
   local runtime_site
   local wheel_site
   mkdir -p "${wheel_dir}" "${wheel_cwd}"
+  cp "${project_root}/src/main.py" "${wheel_main}"
 
   "${python_bin}" -m pip wheel --no-deps --no-build-isolation \
     third_party/pytorch_kinematics third_party/utils_python . -w "${wheel_dir}"
@@ -123,14 +125,18 @@ for module in (ada_grasp_ctrl, mr_utils, pytorch_kinematics):
     origin = Path(module.__file__).resolve()
     assert origin.is_relative_to(wheel_site), f"{module.__name__} loaded from {origin}, not {wheel_site}"
 ' "${wheel_site}"
-  env -u PYTHONPATH "${wheel_venv}/bin/ada-grasp-ctrl" --help >/dev/null
+  if [[ -e "${wheel_venv}/bin/ada-grasp-ctrl" ]]; then
+    echo "Wheel unexpectedly installed the removed ada-grasp-ctrl console command." >&2
+    exit 1
+  fi
+  env -u PYTHONPATH "${wheel_venv}/bin/python" "${wheel_main}" --help >/dev/null
 
   local missing_root_status=0
   env -u ADA_GRASP_CTRL_ASSET_ROOT \
       -u ADA_GRASP_CTRL_DATA_ROOT \
       -u ADA_GRASP_CTRL_OUTPUT_ROOT \
       -u PYTHONPATH \
-      "${wheel_venv}/bin/ada-grasp-ctrl" \
+      "${wheel_venv}/bin/python" "${wheel_main}" \
       task=control_stat hand=dummy_arm_shadow n_worker=1 || missing_root_status=$?
   if (( missing_root_status != 2 )); then
     echo "Wheel without external roots returned ${missing_root_status}; expected 2." >&2
@@ -139,7 +145,7 @@ for module in (ada_grasp_ctrl, mr_utils, pytorch_kinematics):
 
   (
     cd "${wheel_cwd}"
-    env -u PYTHONPATH "${wheel_venv}/bin/ada-grasp-ctrl" \
+    env -u PYTHONPATH "${wheel_venv}/bin/python" "${wheel_main}" \
       setting=tabletop hand=dummy_arm_shadow task=control_eval \
       exp_name=release_wheel n_worker=1 \
       asset_root="${project_root}/assets" data_root="${project_root}" \

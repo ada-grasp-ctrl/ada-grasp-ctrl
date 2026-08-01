@@ -1,12 +1,12 @@
 # Hand asset audit
 
-This directory contains project-maintained MJCF files plus local meshes used by the three supported hands. The repository MIT license does not automatically relicense upstream robot descriptions or meshes.
+This directory contains project-maintained MJCF files plus local meshes used by the three supported hands. The repository currently provides no project-wide license for project-owned content, and it does not alter or replace the licenses that apply to upstream robot descriptions or meshes.
 
 ## Runtime reachability (audited 2026-08-01)
 
 The active paths below are selected by `src/ada_grasp_ctrl/config/hand/*.yaml` and `RobotFactory`, and are exercised by the quick and fixed release gates.
 
-| Hand | Active local files | External mesh source | Repository license evidence |
+| Hand | Active local files | External mesh source | License evidence in the repository |
 |---|---|---|---|
 | Allegro | `allegro/right_hand.xml`, `dummy_arm_allegro/right.xml` | `third_party/mujoco_menagerie/wonik_allegro/assets` | Pinned submodule `wonik_allegro/LICENSE` (BSD-2-Clause, SimLab) and `wonik_allegro/README.md` |
 | Shadow | `shadow/right_hand.xml`, `dummy_arm_shadow/right_no_tendon.xml` | `third_party/mujoco_menagerie/shadow_hand/assets` | Pinned submodule `shadow_hand/LICENSE` (Apache-2.0) and `shadow_hand/README.md` |

@@ -1,4 +1,4 @@
-"""Hydra command-line entry point for supported public tasks."""
+"""Hydra command runner for supported public tasks."""
 
 import logging
 
@@ -39,7 +39,7 @@ def hydra_main(config: DictConfig) -> None:
         raise _ApplicationSystemExit(error.exit_code) from error
 
 
-def main() -> None:
+def run() -> None:
     """Run the Hydra application with stable user-facing exit codes.
 
     Returns:
@@ -59,5 +59,14 @@ def main() -> None:
         raise SystemExit(2) from None
 
 
+def main() -> None:
+    """Reject the removed setuptools console entry point.
+
+    Raises:
+        SystemExit: Always, with migration guidance for stale installations.
+    """
+    raise SystemExit("The 'ada-grasp-ctrl' console command has been removed; use 'python src/main.py' instead.")
+
+
 if __name__ == "__main__":
-    main()
+    run()

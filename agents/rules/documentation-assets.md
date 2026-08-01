@@ -12,7 +12,7 @@ Apply this rule to `README.md`, public examples, support claims, licenses, attri
 
 ## Assets and provenance
 
-- The repository MIT license covers project source, not automatically third-party submodules, hand descriptions/meshes, or bundled data.
+- The repository currently provides no project-wide license. Third-party submodules, hand descriptions/meshes, and bundled data remain subject to their own licenses and permission records.
 - Preserve upstream license and attribution files. Do not invent an authorizing party, date, scope, copyright holder, import commit, or permission statement.
 - Treat the DGN/BODex example object's redistribution evidence and the local LEAP Tac3D mesh provenance as unresolved until primary records are added.
 - Reachability is not permission: an unused asset may still have legal constraints, and an upstream license for a similar asset does not prove coverage of a local derivative.
@@ -23,4 +23,3 @@ Apply this rule to `README.md`, public examples, support claims, licenses, attri
 
 - Read [../knowledge/asset-provenance.md](../knowledge/asset-provenance.md) before editing bundled object/hand assets, attribution, release-readiness language, or deletion candidates.
 - Read [../knowledge/testing-release.md](../knowledge/testing-release.md) before changing benchmark or reproducibility claims.
-

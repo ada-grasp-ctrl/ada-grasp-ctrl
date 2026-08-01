@@ -40,7 +40,7 @@ When a task spans domains, load all matching rules. Rules are mandatory constrai
 
 ## Development entry points
 
-Use the maintained Python 3.10 conda environment from `environment.yml`. The installed entry point is `ada-grasp-ctrl`; `python src/main.py` is a compatibility wrapper.
+Use the maintained Python 3.10 conda environment from `environment.yml`. Run the application from a source checkout with `python src/main.py`; the package does not install a console command.
 
 Start validation at the smallest relevant scope, then widen in proportion to risk. The canonical repository checks are:
 

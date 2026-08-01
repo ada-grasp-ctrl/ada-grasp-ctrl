@@ -31,9 +31,6 @@ dependencies = [
     "viser==1.0.27",
 ]
 
-[project.scripts]
-ada-grasp-ctrl = "ada_grasp_ctrl.cli:main"
-
 # The wheel contains Python code and Hydra configuration only. Hand MJCF,
 # object data, and generated outputs are external roots configured at runtime.
 [tool.setuptools]

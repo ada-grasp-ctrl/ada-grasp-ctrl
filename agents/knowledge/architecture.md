@@ -5,7 +5,7 @@ Load this note when tracing ownership or extending the application. Current code
 ## Execution flow
 
 ```text
-ada-grasp-ctrl / src/main.py
+python src/main.py
   -> Hydra composes config/base.yaml + task/<task>.yaml + hand/<hand>.yaml
   -> cli.configure_runtime() resolves roots, workers, seeds, and log paths
   -> TASK_REGISTRY selects one task
@@ -50,4 +50,3 @@ raw BODex/Learning/Batched record
 - A task is registered in `TASK_REGISTRY` and must participate in runtime setup, manifest generation, stable error mapping, and applicable batch reporting.
 
 The registries are deliberate trust boundaries. They make public support auditable and prevent configuration strings from executing arbitrary code.
-
