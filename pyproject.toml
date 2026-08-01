@@ -21,7 +21,6 @@ dependencies = [
     "omegaconf==2.3.0",
     "mingrui_utils_python==0.1",
     "pytorch_kinematics==0.7.5",
-    "pytorch-seed==0.2.0",
     "PyYAML==6.0.3",
     "requests==2.33.1",
     "scipy==1.15.3",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from glob import glob
+import json
 import logging
 import multiprocessing
 from pathlib import Path
@@ -27,6 +28,85 @@ from ada_grasp_ctrl.utils.robots.base import RobotFactory
 
 
 SUPPORTED_METHODS = {"ours", "op", "bs1", "bs2", "bs3"}
+
+
+def _reported_control_paths(report_path: Path, control_root: Path) -> list[str]:
+    """Load the exact control outputs declared by one batch report.
+
+    Args:
+        report_path: ``control_eval`` run report written by the current run.
+        control_root: Configured control directory that must contain every output.
+
+    Returns:
+        Sorted, deduplicated absolute output paths.
+
+    Raises:
+        PreflightError: If the report is missing, malformed, or references a
+            path outside ``control_root``.
+    """
+    try:
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise PreflightError(f"Cannot read control input report {report_path}: {error}") from error
+    if not isinstance(report, dict) or report.get("task") != "control_eval":
+        raise PreflightError(f"Control input report must declare task='control_eval': {report_path}.")
+    results = report.get("results")
+    if not isinstance(results, list):
+        raise PreflightError(f"Control input report has no results list: {report_path}.")
+
+    normalized_root = control_root.resolve(strict=False)
+    paths: set[str] = set()
+    for index, result in enumerate(results):
+        if not isinstance(result, dict) or not isinstance(result.get("output_paths"), list):
+            raise PreflightError(f"Control input report result {index} has invalid output_paths: {report_path}.")
+        for raw_path in result["output_paths"]:
+            if not isinstance(raw_path, str):
+                raise PreflightError(f"Control input report result {index} contains a non-string output path.")
+            candidate = Path(raw_path).expanduser()
+            if not candidate.is_absolute():
+                candidate = report_path.parent / candidate
+            candidate = candidate.resolve(strict=False)
+            if not candidate.is_relative_to(normalized_root):
+                raise PreflightError(
+                    f"Control input report references {candidate}, which is outside control_dir {normalized_root}."
+                )
+            paths.add(str(candidate))
+    return sorted(paths)
+
+
+def _discover_control_paths(configs: Any) -> tuple[list[str], str]:
+    """Select control inputs from an explicit report or a legacy tree scan.
+
+    Args:
+        configs: Runtime-normalized control-stat configuration.
+
+    Returns:
+        Filtered paths and a human-readable discovery source.
+
+    Raises:
+        PreflightError: If an explicit non-empty report has no outputs matching
+            the requested method and setting.
+    """
+    input_report = configs.task.get("input_report")
+    if input_report not in (None, "", "???"):
+        report_path = Path(input_report)
+        candidates = _reported_control_paths(report_path, Path(configs.control_dir))
+        source = f"report {report_path}"
+    else:
+        candidates = sorted(glob(str(Path(configs.control_dir) / "**" / "*.npy"), recursive=True))
+        source = f"tree {configs.control_dir}"
+
+    method_directory = _method_directory(configs)
+    setting_name = str(configs.task.setting_name)
+    discovered = sorted(
+        path for path in candidates if Path(path).parent.name == method_directory and setting_name in str(path)
+    )
+    if input_report not in (None, "", "???") and candidates and not discovered:
+        raise PreflightError(
+            f"Control input report has {len(candidates)} output(s), but none match "
+            f"method directory '{method_directory}' and setting '{setting_name}'."
+        )
+    return discovered, source
 
 
 def read_data(npy_path: str) -> dict[str, Any]:
@@ -314,18 +394,14 @@ def task_control_stat(configs: Any) -> None:
         )
     method_directory = _method_directory(configs)
     setting_name = str(configs.task.setting_name)
-    discovered = sorted(
-        path
-        for path in glob(str(Path(configs.control_dir) / "**" / "*.npy"), recursive=True)
-        if Path(path).parent.name == method_directory and setting_name in path
-    )
+    discovered, discovery_source = _discover_control_paths(configs)
     write_run_manifest(configs, discovered)
     logging.info(
-        "Found %d control result(s) for method '%s' and setting '%s' in %s.",
+        "Found %d control result(s) for method '%s' and setting '%s' from %s.",
         len(discovered),
         method_directory,
         setting_name,
-        configs.control_dir,
+        discovery_source,
     )
 
     indexed_data: list[tuple[int, str, dict[str, Any] | None, SampleResult | None]] = []

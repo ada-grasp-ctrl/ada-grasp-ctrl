@@ -1,5 +1,6 @@
 method: ours
 ablation_name: default
+input_report: null
 
 lift_height: 0.2
 n_terminal_steps: 5

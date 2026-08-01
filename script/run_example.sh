@@ -24,7 +24,21 @@ cd "${project_root}"
 export PYTHONPATH="${project_root}/src${PYTHONPATH:+:${PYTHONPATH}}"
 export MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp/ada_grasp_ctrl_mpl}"
 
-example_root="${project_root}/output/example_${hand}"
+run_id="${ADA_GRASP_CTRL_RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
+case "${run_id}" in
+  *[!A-Za-z0-9._-]*) echo "Invalid ADA_GRASP_CTRL_RUN_ID '${run_id}'." >&2; exit 2 ;;
+  .|..) echo "Invalid ADA_GRASP_CTRL_RUN_ID '${run_id}'." >&2; exit 2 ;;
+esac
+example_base="${ADA_GRASP_CTRL_EXAMPLE_BASE:-${project_root}/output/examples}"
+example_root="${example_base}/${hand}/${run_id}"
+if [[ -e "${example_root}" || -L "${example_root}" ]]; then
+  echo "Example run directory already exists; choose a new ADA_GRASP_CTRL_RUN_ID: ${example_root}" >&2
+  exit 2
+fi
+if ! mkdir -p "${example_root}"; then
+  echo "Cannot create example run directory: ${example_root}" >&2
+  exit 2
+fi
 fixture_root="${project_root}/examples/data/${hand}"
 object_info="${project_root}/examples/assets/object/core_bottle_15787789482f045d8add95bf56d3d2fa/info/simplified.json"
 if [[ ! -f "${object_info}" ]]; then
@@ -48,14 +62,14 @@ run_stage() {
 if [[ "${mode}" == "full" ]]; then
   run_stage format "${python_bin}" src/main.py \
     setting=tabletop hand="${hand}" task=format exp_name=example \
-    n_worker=1 save_dir="${example_root}" grasp_dir="${example_root}/formatted" \
+    n_worker=1 output_root="${example_root}" save_dir="${example_root}" grasp_dir="${example_root}/formatted" \
     log_dir="${example_root}/log/format" task.data_name=Learning task.max_num=-1 \
     task.data_path="${fixture_root}/raw"
   if (( overall_status == 2 )); then exit 2; fi
 
   run_stage dummy_arm_qpos "${python_bin}" src/main.py \
     setting=tabletop hand="${hand}" task=dummy_arm_qpos exp_name=example \
-    n_worker=1 save_dir="${example_root}" grasp_dir="${example_root}/formatted" \
+    n_worker=1 output_root="${example_root}" save_dir="${example_root}" grasp_dir="${example_root}/formatted" \
     dummy_arm_grasp_dir="${example_root}/dummy_arm" log_dir="${example_root}/log/dummy_arm_qpos" \
     task.max_num=-1
   if (( overall_status == 2 )); then exit 2; fi
@@ -66,7 +80,7 @@ fi
 
 run_stage control_eval "${python_bin}" src/main.py \
   setting=tabletop hand="dummy_arm_${hand}" task=control_eval exp_name=example \
-  n_worker=1 save_dir="${example_root}" grasp_dir="${control_input}" \
+  n_worker=1 output_root="${example_root}" save_dir="${example_root}" grasp_dir="${control_input}" \
   control_dir="${example_root}/control" log_dir="${example_root}/log/control_eval" \
   task.method=ours task.input_data=grasp_dir task.max_num=-1 \
   task.debug_viewer=false task.debug_render=false
@@ -74,9 +88,11 @@ if (( overall_status == 2 )); then exit 2; fi
 
 run_stage control_stat "${python_bin}" src/main.py \
   setting=tabletop hand="dummy_arm_${hand}" task=control_stat exp_name=example \
-  n_worker=1 save_dir="${example_root}" control_dir="${example_root}/control" \
-  log_dir="${example_root}/log/control_stat" task.method=ours task.setting_name=dist_0
+  n_worker=1 output_root="${example_root}" save_dir="${example_root}" control_dir="${example_root}/control" \
+  log_dir="${example_root}/log/control_stat" task.method=ours task.setting_name=dist_0 \
+  task.input_report="${example_root}/log/control_eval/run_report.json"
 
-"${python_bin}" script/report_example.py "${example_root}"
+run_stage report "${python_bin}" script/report_example.py "${example_root}"
+echo "[ada-grasp-ctrl] run_id: ${run_id}"
 echo "[ada-grasp-ctrl] outputs: ${example_root}"
 exit "${overall_status}"

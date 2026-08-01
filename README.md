@@ -74,13 +74,15 @@ ADA_GRASP_CTRL_OUTPUT_ROOT=/tmp/ada-grasp-output \
 
 ## 60-second quick start
 
-The repository contains an authorized minimal DGN bottle object and one precomputed dummy-arm grasp for each supported hand. Quick mode runs `control_eval → control_stat` headlessly and writes only below `output/example_<hand>`:
+The repository contains a minimal DGN bottle object and one precomputed dummy-arm grasp for each supported hand. Quick mode runs `control_eval → control_stat` headlessly. Every invocation gets a unique output directory below `output/examples/<hand>/<UTC-run-id>`, so reports and statistics cannot consume an older run:
 
 ```bash
 bash script/run_example.sh shadow quick
 bash script/run_example.sh allegro quick
 bash script/run_example.sh leap_tac3d quick
 ```
+
+Set `ADA_GRASP_CTRL_RUN_ID` to a safe, previously unused identifier for reproducible automation, or `ADA_GRASP_CTRL_EXAMPLE_BASE` to relocate the per-run directories. The script refuses an existing run directory and prints the exact final path. `control_stat` receives the current `control_eval/run_report.json` through `task.input_report`; it does not scan unrelated results. A missing output, inconsistent statistics, or report-generation failure contributes to the script's final exit code.
 
 The historical wrapper names invoke the same quick mode:
 
@@ -98,7 +100,7 @@ bash script/run_example.sh shadow full
 
 At completion the script prints the output directory, episode status, lift result, statistics file, and success-rate denominator. Exit code `1` means all possible samples were processed but at least one execution error or solver degradation occurred; inspect the reports described below.
 
-The bundled data is not relicensed by the source MIT License. Its source, authorization scope, and checksums are recorded in [the object attribution](examples/assets/object/core_bottle_15787789482f045d8add95bf56d3d2fa/ATTRIBUTION.md).
+The bundled data is not relicensed by the source MIT License. Its source and verified checksums are recorded in [the object attribution](examples/assets/object/core_bottle_15787789482f045d8add95bf56d3d2fa/ATTRIBUTION.md). The maintainer has stated that redistribution was authorized, but the authorizing party, date, scope, and primary message/ticket are not present in this repository; public release remains legally blocked until that record is completed.
 
 ## Complete four-stage pipeline
 
@@ -170,7 +172,7 @@ A control record keeps the historical trajectories (`obj_pose`, `dof`, `doa`, `c
 
 Every task log directory contains:
 
-- `run_manifest.yaml`: resolved config, final absolute roots, seed, workers, git state (or explicit unavailable values in wheel mode), dependencies including the Pinocchio module-version fallback, hardware, and sorted inputs;
+- `run_manifest.yaml`: resolved config, final absolute roots, seed, workers, git state (or explicit unavailable values in wheel mode), dependencies including the Pinocchio module-version fallback, actual module import origins, hardware, and sorted inputs;
 - `run_report.json`: totals and one structured result per input;
 - `failures.jsonl`: execution-error and solver-degraded records with messages and tracebacks.
 
@@ -216,6 +218,23 @@ The three-hand × five-method fixed matrix uses a strict golden comparison: timi
 PYTHONPATH=src python script/audit_golden.py verify release/golden/artifact.json
 ```
 
+The executable release driver uses a unique temporary root by default, refuses a non-empty configured root, and rejects an empty golden baseline. Portable gates cover all three quick examples, the 15-case fixed matrix, and isolated wheel mode:
+
+```bash
+PYTHON_BIN=python bash script/run_release_gate.sh portable
+```
+
+The 300-case gate requires the external release input tree recorded by the artifact:
+
+```bash
+ADA_GRASP_CTRL_RELEASE_INPUT_ROOT=/path/to/release-inputs \
+  PYTHON_BIN=python bash script/run_release_gate.sh release300
+```
+
+`workflow_dispatch` in `.github/workflows/release.yml` exposes the same `quick`, `fixed`, `wheel`, `portable`, `release300`, and `all` gates. The 300-case job runs on a self-hosted runner because the full dataset is not redistributed by this repository.
+
+These gates verify technical reproducibility; they do not grant redistribution rights. The unresolved object authorization record and LEAP Tac3D provenance are listed in the [object attribution](examples/assets/object/core_bottle_15787789482f045d8add95bf56d3d2fa/ATTRIBUTION.md) and [hand asset audit](assets/hand/README.md).
+
 One single-process Shadow `ours` episode on the pinned environment gives the following implementation benchmark. These one-run values are a release sanity check, not a hardware-independent performance guarantee.
 
 | Metric | Pre-refactor | Refactored |
@@ -256,4 +275,4 @@ CI runs Python 3.10 lint/format checks, unit/schema/CLI tests, and a precomputed
 
 ## License and acknowledgements
 
-Ada Grasp Ctrl source is licensed under the [MIT License](LICENSE), copyright 2026 Ada Grasp Ctrl Authors. Third-party submodules and example data retain their own licenses and attribution. The evaluation codebase builds upon [DexGraspBench](https://github.com/JYChen18/DexGraspBench); the example object comes from DGN/BODex as attributed above.
+Ada Grasp Ctrl source is licensed under the [MIT License](LICENSE), copyright 2026 Ada Grasp Ctrl Authors. Third-party submodules and example data retain their own licenses and attribution. The evaluation codebase builds upon [DexGraspBench](https://github.com/JYChen18/DexGraspBench); the example object comes from DGN/BODex as attributed above. See the [hand asset audit](assets/hand/README.md) for runtime reachability, upstream license references, unresolved provenance, and retained deletion candidates.

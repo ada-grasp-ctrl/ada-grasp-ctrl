@@ -156,8 +156,9 @@ def configure_runtime(config: DictConfig) -> DictConfig:
                     raise PreflightError("task.data_path must be configured.") from error
                 if data_path not in (None, "???"):
                     config.task.data_path = str(resolve_from_root(data_path, root_kind="data"))
-            if "debug_dir" in config.task and config.task.debug_dir not in (None, "???"):
-                config.task.debug_dir = str(resolve_from_root(config.task.debug_dir, root_kind="output"))
+            for field in ("debug_dir", "input_report"):
+                if field in config.task and config.task[field] not in (None, "???"):
+                    config.task[field] = str(resolve_from_root(config.task[field], root_kind="output"))
     seed_everything(int(config.seed))
     return config
 
@@ -247,6 +248,34 @@ def _dependency_versions() -> dict[str, str | None]:
     return versions
 
 
+def _dependency_origins() -> dict[str, str | None]:
+    """Record where critical Python modules were actually imported from.
+
+    Version strings alone do not distinguish conda and wheel builds that can
+    produce observably different closed-loop floating trajectories.
+
+    Returns:
+        Mapping from module names to normalized source or extension paths.
+    """
+    origins: dict[str, str | None] = {}
+    for module_name in (
+        "ada_grasp_ctrl",
+        "numpy",
+        "scipy",
+        "torch",
+        "mujoco",
+        "pinocchio",
+        "pytorch_kinematics",
+        "mr_utils",
+    ):
+        try:
+            module_path = getattr(importlib.import_module(module_name), "__file__", None)
+        except ImportError:
+            module_path = None
+        origins[module_name] = str(Path(module_path).resolve(strict=False)) if module_path else None
+    return origins
+
+
 def write_run_manifest(config: DictConfig, input_paths: Iterable[str] = ()) -> Path:
     """Write configuration and environment metadata for reproducibility.
 
@@ -276,6 +305,7 @@ def write_run_manifest(config: DictConfig, input_paths: Iterable[str] = ()) -> P
             "python": platform.python_version(),
             "platform": platform.platform(),
             "packages": _dependency_versions(),
+            "package_origins": _dependency_origins(),
             "cuda_available": cuda_available,
             "cuda_version": torch.version.cuda,
             "gpu_names": gpu_names,
