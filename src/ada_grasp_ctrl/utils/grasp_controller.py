@@ -71,6 +71,8 @@ class _ControlProblemDefinition:
 class _ObjectiveWeights:
     """Hydra-managed weights used to assemble dimension-dependent objectives."""
 
+    # The rx/ry/rz entries must be identical because the analytic SO(3)
+    # orientation gradient assumes an isotropic rotational weight.
     hand_base_pose: tuple[float, ...]
     hand_joint_position: float
     joint_velocity: float
@@ -977,6 +979,8 @@ class GraspController:
 
         controller_parameters = self._require_parameters()
         weights = controller_parameters.objective_weights
+        # Keep the rotational entries isotropic; anisotropic weights require an
+        # SO(3) left-Jacobian-inverse term in the analytic orientation gradient.
         w_hb_pose = np.diag(weights.hand_base_pose)
         w_q_hand = weights.hand_joint_position * np.eye(n_hand_dof)
         w_dqa = weights.joint_velocity * np.eye(n_dof)

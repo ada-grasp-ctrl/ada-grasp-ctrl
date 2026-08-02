@@ -41,7 +41,8 @@ control:
     max: 1e3 # Maximum clipped gain.
 
   objective_weights: # Quadratic control-objective weights.
-    hand_base_pose: [0.0, 0.0, 100.0, 10.0, 10.0, 10.0] # Base-pose weights: x, y, z, rx, ry, rz.
+    # Base-pose weights: x, y, z, rx, ry, rz. The rx/ry/rz weights must be identical for the current analytic gradient.
+    hand_base_pose: [0.0, 0.0, 100.0, 10.0, 10.0, 10.0]
     hand_joint_position: 1.0 # Hand joint-position tracking weight.
     joint_velocity: 0.01 # Joint-velocity penalty weight.
     joint_acceleration: 0.001 # Joint-acceleration penalty weight.
