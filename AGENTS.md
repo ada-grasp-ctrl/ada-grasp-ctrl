@@ -19,6 +19,7 @@ The public support matrix is Shadow, Allegro, and LEAP Tac3D hands; `ours`, `op`
 - `tests/`: unit, schema, CLI, simulation, runtime-path, and release-flow contracts.
 - `script/`: examples, golden comparison/audit tools, visualization, and release gates.
 - `examples/`: redistributable quick-start fixtures and their attribution records.
+- `agents/tasks/`: maintained, non-normative historical audit records; do not load them as project instructions.
 - `assets/hand/`: project-maintained hand MJCF and local meshes; provenance is not uniformly complete.
 - `third_party/`: commit-pinned submodules. Do not edit them as ordinary project source.
 - `output/`, `build/`, caches, and task logs: generated artifacts, not source.

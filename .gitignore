@@ -1,23 +1,46 @@
-# .vscode*
+# Python caches and build products
 __pycache__/
-*MUJOCO_LOG.TXT
-
-# Ignore Python cache directories
-__pycache__/
-**/__pycache__/
 *.py[cod]
 *.egg-info/
+.eggs/
 build/
 dist/
+*.whl
+
+# Test, coverage, and analysis caches
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
 .pytest_cache/
 .ruff_cache/
-.coverage
+.mypy_cache/
+.hypothesis/
+.tox/
+.nox/
 
-output/*
-!output/learn_shadow
-!output/learn_allegro
-!output/learn_leap_tac3d
-output/learn_*/log/
+# Local Python environments
+.venv/
+venv/
+env/
+.conda/
 
-assets/object
-debug*
+# Runtime outputs and externally restored data
+output/
+release/golden/
+assets/object/
+
+# Exact MuJoCo and debug artifacts
+MUJOCO_LOG.TXT
+debug.xml
+
+# Editor, agent, and operating-system state
+.vscode/
+.idea/
+.agents/
+.codex/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db

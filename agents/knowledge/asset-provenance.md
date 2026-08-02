@@ -11,11 +11,13 @@ Load this note for asset changes, attribution, deletion, or public-release wordi
 
 These gaps block a claim of fully audited public redistribution even though the technical release gates can pass.
 
-## Retained deletion candidates
+## Removed legacy assets
 
-The hand asset audit lists currently unreachable directories/files, including legacy LEAP/UR composites, superseded Shadow XML, a one-off attachment script, and unused LEAP Tac3D meshes. They remain tracked pending explicit maintainer confirmation. Static unreachability supports a deletion proposal but does not answer provenance, redistribution, or historical-reproduction questions.
+The hand asset audit records legacy LEAP/UR composites, superseded Shadow XML, a one-off attachment script, and five
+unused LEAP Tac3D meshes removed on 2026-08-03 after explicit maintainer approval. Git history remains the recovery
+path for historical reproduction. Static unreachability and deletion do not answer provenance or redistribution
+questions for the retained assets.
 
 ## Evidence expected for new or repaired provenance
 
 Record the upstream project and exact version/commit, original filename/path, copyright holder, license text/reference, project modifications, redistribution basis, import date if known, and stable checksums. For private permission, preserve the actual authorizing communication or a stable internal reference; do not paraphrase missing evidence into certainty.
-

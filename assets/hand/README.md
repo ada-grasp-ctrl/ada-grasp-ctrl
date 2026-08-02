@@ -2,7 +2,7 @@
 
 This directory contains project-maintained MJCF files plus local meshes used by the three supported hands. The repository currently provides no project-wide license for project-owned content, and it does not alter or replace the licenses that apply to upstream robot descriptions or meshes.
 
-## Runtime reachability (audited 2026-08-01)
+## Runtime reachability (audited 2026-08-03)
 
 The active paths below are selected by `src/ada_grasp_ctrl/config/hand/*.yaml` and `RobotFactory`, and are exercised by the quick and fixed release gates.
 
@@ -14,11 +14,12 @@ The active paths below are selected by `src/ada_grasp_ctrl/config/hand/*.yaml` a
 
 The project-modified Allegro and Shadow XML files load licensed Menagerie meshes, but the repository history also lacks a primary import/derivation record for the XML text itself. Preserve the upstream license files with every distribution and complete the derivation record before treating this audit as final legal clearance.
 
-## Confirmed static deletion candidates
+## Removed static legacy assets
 
-The following tracked paths are not referenced by maintained configuration, robot registration, release scripts, tests, or active MJCF includes:
+The following paths were not referenced by maintained configuration, robot registration, release scripts, tests, or
+active MJCF includes and were removed after explicit maintainer approval:
 
-| Candidate | Approximate size | Audit note |
+| Removed path | Approximate size | Audit note |
 |---|---:|---|
 | `leap/` | 1.7 MB | No registered `leap` hand; maintained hand name is `leap_tac3d`. |
 | `ur5_leap_tac3d/` | 25 MB | No maintained task or configuration loads the UR5 composite; it duplicates the 20 MB Tac3D mesh tree. |
@@ -28,7 +29,9 @@ The following tracked paths are not referenced by maintained configuration, robo
 | `shadow/right_with_forearm.xml` | 20 KB | Superseded by the maintained forearm-free `right_hand.xml`. |
 | Five unreferenced STL files under `leap_tac3d/leap_hand/meshes` | 6.9 MB | `fingertip_base.stl`, `fingertip_custom.stl`, `palm_lower_left.stl`, `thumb_fingertip_base.stl`, and `thumb_left_temp_base.stl` are not referenced by either active LEAP Tac3D MJCF. |
 
-They are retained in this revision because deleting the large asset sets requires explicit maintainer confirmation. This table is a reachability finding, not a claim that the files may legally be redistributed.
+These files remain recoverable from Git history for historical reproduction. Their removal is a technical reachability
+decision only; it does not establish or change the provenance, licensing, or redistribution status of the retained
+assets.
 
 ## Modification clarification
 

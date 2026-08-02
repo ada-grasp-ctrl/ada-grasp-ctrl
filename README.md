@@ -188,6 +188,27 @@ Set `task.setting_name=dist_2` when summarizing the `[0.02]` perturbation output
 and failed grasps from invalid initialization, solver degradation, and execution errors; the success-rate denominator
 contains only `success + failure`.
 
+### Maintained ablation matrix runner
+
+Use the maintained runner for the three-hand, five-method `dist_0`/`dist_2` matrix. The input archive must contain
+`learn_dummy_arm_<hand>/graspdata` for every selected hand. The output path is required, must be absolute, and must not
+already exist:
+
+```bash
+python script/run_ablation_baselines.py \
+  --input-root /absolute/path/to/archived-inputs \
+  --output-root /absolute/path/to/new-ablation-run \
+  --data-root /absolute/path/to/data \
+  --asset-root /absolute/path/to/assets \
+  --seed 12 --workers 12 --max-num -1
+```
+
+Each case has an isolated `output_root`. Its statistics command consumes that case's exact current
+`control_eval/run_report.json`, and the runner writes `experiment_report.json` at the matrix root. Runner exit codes
+match the application contract: `0` for clean completion, `1` when all possible work finishes with an execution error
+or solver degradation recorded by a child task, and `2` for preflight failure, a missing current report, or a child
+preflight/error exit.
+
 Use the matching hand name at each stage:
 
 | Format and IK | Control and statistics |
@@ -243,6 +264,7 @@ the authors for their great work.
 ## References and licensing
 
 - [Implementation notes](docs/practical-modifications-in-implementation.md)
+- [Repository hygiene and local-data retention](docs/repository-hygiene.md)
 - [Example object attribution](examples/assets/object/core_bottle_15787789482f045d8add95bf56d3d2fa/ATTRIBUTION.md)
 - [Hand asset audit](assets/hand/README.md)
 
