@@ -20,6 +20,10 @@ on:
         required: false
         type: string
 
+defaults:
+  run:
+    shell: bash -leo pipefail {0}
+
 jobs:
   portable:
     if: ${{ inputs.gate != 'release300' }}
@@ -34,6 +38,10 @@ jobs:
           cache-environment: true
           cache-downloads: true
           init-shell: bash
+      - name: Verify project environment
+        run: |
+          python -c "import sys; print(f'Python executable: {sys.executable}'); assert sys.version_info[:2] == (3, 10), sys.version"
+          python -c "import ada_grasp_ctrl, mujoco, numpy, omegaconf"
       - name: Run portable release gates
         env:
           ADA_GRASP_CTRL_RELEASE_GATE_ROOT: ${{ github.workspace }}/release-gate-output
@@ -61,6 +69,10 @@ jobs:
           cache-environment: true
           cache-downloads: true
           init-shell: bash
+      - name: Verify project environment
+        run: |
+          python -c "import sys; print(f'Python executable: {sys.executable}'); assert sys.version_info[:2] == (3, 10), sys.version"
+          python -c "import ada_grasp_ctrl, mujoco, numpy, omegaconf"
       - name: Run 300-episode release gate
         env:
           ADA_GRASP_CTRL_RELEASE_GATE_ROOT: ${{ github.workspace }}/release-gate-output
