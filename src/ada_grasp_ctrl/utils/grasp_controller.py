@@ -1244,7 +1244,7 @@ class GraspController:
             return friction_cone_slack(x[n_dof:].reshape(-1, 3), self.mu)
 
         def friction_cone_constraint_grad(x: np.ndarray) -> np.ndarray:
-            """Return the regularized friction-cone Jacobian used by control.
+            """Return the exact circular friction-cone Jacobian used by control.
 
             Args:
                 x: Joint-delta variables followed by contact-force variables.
@@ -1252,14 +1252,9 @@ class GraspController:
             Returns:
                 Dense friction-cone Jacobian aligned with ``x``.
             """
-            contact_forces = x[n_dof:].reshape(-1, 3)
-            fy, fz = contact_forces[:, 1], contact_forces[:, 2]
-            tangential_norm = np.sqrt(fy**2 + fz**2) + 1e-8
             gradient = np.zeros((n_con, x.shape[0]))
-            indices = np.arange(n_con)
-            gradient[indices, n_dof + 3 * indices] = self.mu
-            gradient[indices, n_dof + 3 * indices + 1] = -fy / tangential_norm
-            gradient[indices, n_dof + 3 * indices + 2] = -fz / tangential_norm
+            contact_forces = x[n_dof:].reshape(-1, 3)
+            gradient[:, n_dof:] = friction_cone_jacobian(contact_forces, self.mu)
             return gradient
 
         def force_magnitude_constraint(x: np.ndarray) -> np.ndarray:

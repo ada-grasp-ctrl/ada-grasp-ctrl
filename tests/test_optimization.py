@@ -468,6 +468,62 @@ class SharedControlProblemTest(unittest.TestCase):
         self.assertEqual(contact_model_dimension(stage=1), 1)
         self.assertEqual(contact_model_dimension(stage=2), 3)
 
+    def test_command_friction_cone_jacobian_is_exact_near_tangential_origin(self):
+        """Embed the shared exact cone Jacobian in the full solver layout."""
+        controller = self._controller()
+        base_context = self._context()
+        contact_forces = np.array(
+            [
+                [1.0, 0.0, 0.0],
+                [2.0, 1e-10, 0.0],
+                [3.0, 0.0, -2e-10],
+                [4.0, -0.3, 0.4],
+            ]
+        )
+        num_contacts = contact_forces.shape[0]
+        context = _ControlProblemContext(
+            num_arm_dof=base_context.num_arm_dof,
+            num_hand_dof=base_context.num_hand_dof,
+            num_dof=base_context.num_dof,
+            num_contacts=num_contacts,
+            doa_to_dof=base_context.doa_to_dof,
+            joint_limits=base_context.joint_limits,
+            max_delta_qpos=base_context.max_delta_qpos,
+            contact_forces=contact_forces.reshape(-1),
+            contact_jacobian=np.tile(base_context.contact_jacobian, (num_contacts, 1)),
+            stiffness_jacobian=np.tile(base_context.stiffness_jacobian, (num_contacts, 1)),
+            hand_base_name=base_context.hand_base_name,
+            target_hand_base_position=base_context.target_hand_base_position,
+            target_hand_base_orientation=base_context.target_hand_base_orientation,
+        )
+        problem = controller._build_control_problem(
+            policy="coordinated",
+            context=context,
+            stage=2,
+            dt=0.2,
+            current_qpos_a=np.array([0.1, -0.2]),
+            target_qpos_f=np.array([0.0, 0.3]),
+            last_delta_qpos_a=np.array([0.02, -0.01]),
+            desired_sum_force=10.0,
+            desired_forces=contact_forces,
+            contacts=[{} for _ in range(num_contacts)],
+            grasp_matrix=np.zeros((6, 3 * num_contacts)),
+            use_arm_motion=True,
+        )
+        constraint_index = problem.constraint_names.index("friction_cone")
+        cone_jacobian = problem.constraints[constraint_index]["jac"]
+        variables = np.concatenate([np.array([0.2, -0.1]), contact_forces.reshape(-1)])
+
+        actual = cone_jacobian(variables)
+        expected_force_jacobian = np.zeros((num_contacts, 3 * num_contacts))
+        expected_force_jacobian[0, 0:3] = [controller.mu, 0.0, 0.0]
+        expected_force_jacobian[1, 3:6] = [controller.mu, -1.0, 0.0]
+        expected_force_jacobian[2, 6:9] = [controller.mu, 0.0, 1.0]
+        expected_force_jacobian[3, 9:12] = [controller.mu, 0.6, -0.8]
+
+        np.testing.assert_array_equal(actual[:, : context.num_dof], np.zeros((num_contacts, context.num_dof)))
+        np.testing.assert_allclose(actual[:, context.num_dof :], expected_force_jacobian, rtol=0.0, atol=1e-15)
+
     def test_public_wrappers_delegate_to_the_same_optimizer(self):
         """Keep both compatibility APIs on one shared optimization path."""
         controller = self._controller()
