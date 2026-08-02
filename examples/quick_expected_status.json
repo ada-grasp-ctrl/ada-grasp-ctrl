@@ -1,0 +1,1242 @@
+{
+  "fixture_manifest_sha256": "d4e8bc8f305929607d4e411fd5fbc03f0ac8be4cfb1d04c6f5b25bdbb920d42d",
+  "hands": {
+    "allegro": {
+      "aggregate_sha256": "336779527223d11030a01b0e272b362ef04beb5d65a6947155b6fae42a1b955c",
+      "counts": {
+        "execution_error": 0,
+        "failure": 5,
+        "invalid_initialization": 14,
+        "solver_degraded": 1,
+        "success": 80
+      },
+      "records": [
+        {
+          "classification": "success",
+          "path": "core_bottle_15787789482f045d8add95bf56d3d2fa/tabletop_ur10e/scale006_pose004_0/partial_pc_00_6.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_bottle_547fa0085800c5c3846564a8a219239b/tabletop_ur10e/scale006_pose002_0/partial_pc_03_0.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_bottle_940b9e91a4a32a4130612f5c0ef21eb8/tabletop_ur10e/scale012_pose008_0/partial_pc_03_3.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_bottle_aa616bbf51ae233278d5828fe3be4b43/tabletop_ur10e/scale008_pose005_0/partial_pc_00_1.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_bottle_f079d5f4f4a8cd9318431871c8e05789/tabletop_ur10e/scale006_pose003_0/partial_pc_01_3.npy"
+        },
+        {
+          "classification": "invalid_initialization",
+          "path": "core_bottle_f079d5f4f4a8cd9318431871c8e05789/tabletop_ur10e/scale010_pose001_0/partial_pc_00_4.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_bowl_b65cbede8f483d51f7de4d28691515e1/tabletop_ur10e/scale010_pose000_0/partial_pc_00_0.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_camera_6d036fd1c70e5a5849493d905c02fa86/tabletop_ur10e/scale006_pose001_0/partial_pc_03_6.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_camera_6d036fd1c70e5a5849493d905c02fa86/tabletop_ur10e/scale006_pose004_0/partial_pc_03_9.npy"
+        },
+        {
+          "classification": "invalid_initialization",
+          "path": "core_camera_6d036fd1c70e5a5849493d905c02fa86/tabletop_ur10e/scale012_pose004_0/partial_pc_02_0.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_camera_7077395b60bf4aeb3cb44973ec1ffcf8/tabletop_ur10e/scale008_pose004_0/partial_pc_00_9.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_can_19fa6044dd31aa8e9487fa707cec1558/tabletop_ur10e/scale010_pose011_0/partial_pc_03_5.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_can_6b2c6961ad0891936193d9e76bb15876/tabletop_ur10e/scale006_pose004_0/partial_pc_00_5.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_can_a087f6b5ea424ccc785f06f424b9d06/tabletop_ur10e/scale006_pose002_0/partial_pc_02_3.npy"
+        },
+        {
+          "classification": "invalid_initialization",
+          "path": "core_can_b6c4d78363d965617cb2a55fa21392b7/tabletop_ur10e/scale010_pose007_0/partial_pc_00_2.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_can_f4108f92f3f12f99e3ecb6fd6ed1dd90/tabletop_ur10e/scale006_pose005_0/partial_pc_03_5.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_jar_275cc21fad6aa1b6bfa78a7d067c469c/tabletop_ur10e/scale010_pose008_0/partial_pc_03_8.npy"
+        },
+        {
+          "classification": "invalid_initialization",
+          "path": "core_jar_276bff32316ddd3eec0dc003f0209134/tabletop_ur10e/scale006_pose001_0/partial_pc_02_7.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_jar_281530bc7fbb122f30612f5c0ef21eb8/tabletop_ur10e/scale010_pose006_0/partial_pc_02_9.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_jar_32dc55c3e945384dbc5e533ab711fd24/tabletop_ur10e/scale010_pose008_0/partial_pc_02_2.npy"
+        },
+        {
+          "classification": "failure",
+          "path": "core_jar_32dc55c3e945384dbc5e533ab711fd24/tabletop_ur10e/scale012_pose004_0/partial_pc_00_7.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_jar_37b06eeb82c1a486835e59296200e86/tabletop_ur10e/scale010_pose002_0/partial_pc_01_0.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_jar_ac40978140155f2e5d878ba9ec3c0d6a/tabletop_ur10e/scale012_pose000_0/partial_pc_00_0.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_jar_ac40978140155f2e5d878ba9ec3c0d6a/tabletop_ur10e/scale012_pose006_0/partial_pc_02_8.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_jar_bd3408700fb963b436b0f2a1430e993a/tabletop_ur10e/scale012_pose002_0/partial_pc_02_3.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_jar_c0d3656a60fc5e3b16acbecd8bf6925d/tabletop_ur10e/scale006_pose008_0/partial_pc_02_2.npy"
+        },
+        {
+          "classification": "invalid_initialization",
+          "path": "core_jar_c81fa64321c8d49fb9be450193b1790b/tabletop_ur10e/scale010_pose002_0/partial_pc_01_7.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_mug_127944b6dabee1c9e20e92c5b8147e4a/tabletop_ur10e/scale010_pose001_0/partial_pc_00_2.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_mug_127944b6dabee1c9e20e92c5b8147e4a/tabletop_ur10e/scale010_pose009_0/partial_pc_03_5.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_mug_24651c3767aa5089e19f4cee87249aca/tabletop_ur10e/scale008_pose000_0/partial_pc_00_3.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_mug_73b8b6456221f4ea20d3c05c08e26f/tabletop_ur10e/scale012_pose000_0/partial_pc_00_6.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_mug_a3cd44bbd3ba5b019a4cbf5d3b79df06/tabletop_ur10e/scale006_pose001_0/partial_pc_01_4.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_mug_b6f30c63c946c286cf6897d8875cfd5e/tabletop_ur10e/scale010_pose000_0/partial_pc_00_2.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_mug_c0c130c04edabc657c2b66248f91b3d8/tabletop_ur10e/scale008_pose005_0/partial_pc_01_2.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_mug_ef24c302911bcde6ea6ff2182dd34668/tabletop_ur10e/scale006_pose000_0/partial_pc_00_4.npy"
+        },
+        {
+          "classification": "failure",
+          "path": "core_pillow_a3efd34601ea92facd6e752154c5afc0/tabletop_ur10e/scale008_pose001_0/partial_pc_00_1.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_pillow_d777679b4dd35c76a4136492f17b9a59/tabletop_ur10e/scale012_pose000_0/partial_pc_01_2.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_gd_box_poisson_020/tabletop_ur10e/scale006_pose000_0/partial_pc_01_9.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_gd_box_poisson_020/tabletop_ur10e/scale006_pose004_0/partial_pc_02_0.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_gd_can_poisson_000/tabletop_ur10e/scale008_pose002_0/partial_pc_02_6.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_gd_can_poisson_016/tabletop_ur10e/scale006_pose006_0/partial_pc_00_1.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_gd_jar_poisson_007/tabletop_ur10e/scale006_pose004_0/partial_pc_01_6.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_gd_pot_poisson_001/tabletop_ur10e/scale008_pose006_0/partial_pc_01_6.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_gd_pot_poisson_001/tabletop_ur10e/scale012_pose001_0/partial_pc_01_4.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_gd_rubber_duck_poisson_001/tabletop_ur10e/scale006_pose000_0/partial_pc_00_1.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_gd_soccer_ball_poisson_000/tabletop_ur10e/scale006_pose001_0/partial_pc_02_8.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_gd_tape_poisson_000/tabletop_ur10e/scale010_pose004_0/partial_pc_01_4.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_gd_tetra_pak_poisson_001/tabletop_ur10e/scale008_pose004_0/partial_pc_02_0.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_gd_tetra_pak_poisson_007/tabletop_ur10e/scale012_pose004_0/partial_pc_00_0.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_gd_toy_poisson_006/tabletop_ur10e/scale012_pose004_0/partial_pc_02_1.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_kit_BakingVanilla/tabletop_ur10e/scale006_pose003_0/partial_pc_01_3.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_kit_ChocoIcing/tabletop_ur10e/scale006_pose001_0/partial_pc_01_3.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_kit_HerbSalt/tabletop_ur10e/scale008_pose005_0/partial_pc_03_1.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_kit_HerbSalt/tabletop_ur10e/scale012_pose000_0/partial_pc_01_6.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_kit_HeringTin/tabletop_ur10e/scale012_pose001_0/partial_pc_02_3.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_kit_HotPot2/tabletop_ur10e/scale008_pose001_0/partial_pc_03_5.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_kit_PotatoeDumplings/tabletop_ur10e/scale010_pose003_0/partial_pc_02_7.npy"
+        },
+        {
+          "classification": "solver_degraded",
+          "path": "ddg_kit_SoftCheese/tabletop_ur10e/scale010_pose000_0/partial_pc_01_5.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_ycb_013_apple/tabletop_ur10e/scale006_pose001_0/partial_pc_02_0.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_ycb_065_h_cups/tabletop_ur10e/scale012_pose004_0/partial_pc_03_4.npy"
+        },
+        {
+          "classification": "failure",
+          "path": "ddg_ycb_072_c_toy_airplane/tabletop_ur10e/scale012_pose002_0/partial_pc_02_7.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_ycb_072_c_toy_airplane/tabletop_ur10e/scale012_pose005_0/partial_pc_00_9.npy"
+        },
+        {
+          "classification": "invalid_initialization",
+          "path": "mujoco_Cole_Hardware_Flower_Pot_1025/tabletop_ur10e/scale012_pose000_0/partial_pc_02_1.npy"
+        },
+        {
+          "classification": "success",
+          "path": "mujoco_Crosley_Alarm_Clock_Vintage_Metal/tabletop_ur10e/scale006_pose000_0/partial_pc_00_7.npy"
+        },
+        {
+          "classification": "success",
+          "path": "mujoco_Jarrow_Glucosamine_Chondroitin_Combination_120_Caps/tabletop_ur10e/scale012_pose005_0/partial_pc_00_2.npy"
+        },
+        {
+          "classification": "success",
+          "path": "mujoco_Just_For_Men_Mustache_Beard_Brushin_Hair_Color_Gel_MediumDark_Brown_M40/tabletop_ur10e/scale012_pose001_0/partial_pc_01_8.npy"
+        },
+        {
+          "classification": "success",
+          "path": "mujoco_Just_For_Men_Shampoo_In_Haircolor_Darkest_Brown_50/tabletop_ur10e/scale008_pose004_0/partial_pc_00_6.npy"
+        },
+        {
+          "classification": "success",
+          "path": "mujoco_LACING_SHEEP/tabletop_ur10e/scale006_pose004_0/partial_pc_00_7.npy"
+        },
+        {
+          "classification": "success",
+          "path": "mujoco_Lego_Friends_Advent_Calendar/tabletop_ur10e/scale006_pose004_0/partial_pc_00_1.npy"
+        },
+        {
+          "classification": "success",
+          "path": "mujoco_Olive_Kids_Butterfly_Garden_Munch_n_Lunch_Bag/tabletop_ur10e/scale012_pose001_0/partial_pc_00_7.npy"
+        },
+        {
+          "classification": "success",
+          "path": "mujoco_Perricone_MD_Neuropeptide_Facial_Conformer/tabletop_ur10e/scale006_pose004_0/partial_pc_01_4.npy"
+        },
+        {
+          "classification": "invalid_initialization",
+          "path": "mujoco_Perricone_MD_Photo_Plasma/tabletop_ur10e/scale006_pose004_0/partial_pc_02_9.npy"
+        },
+        {
+          "classification": "success",
+          "path": "mujoco_Perricone_MD_The_Power_Treatments/tabletop_ur10e/scale006_pose000_0/partial_pc_00_6.npy"
+        },
+        {
+          "classification": "success",
+          "path": "mujoco_Target_Basket_Medium/tabletop_ur10e/scale010_pose005_0/partial_pc_01_0.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_Book_cc0e864645032185d2d64d0098518cf/tabletop_ur10e/scale010_pose001_0/partial_pc_00_9.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_Camera_8c1d677d14d828b852ba02b2eec04f5e/tabletop_ur10e/scale010_pose002_0/partial_pc_02_0.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_Camera_fdcd83539b8db2c8b5635bf39f10a28a/tabletop_ur10e/scale008_pose003_0/partial_pc_02_2.npy"
+        },
+        {
+          "classification": "failure",
+          "path": "sem_Detergent_547fa0085800c5c3846564a8a219239b/tabletop_ur10e/scale008_pose001_0/partial_pc_01_9.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_DrinkingUtensil_5bbc259497af2fa15db77ed1f5c8b93/tabletop_ur10e/scale006_pose008_0/partial_pc_01_7.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_DrinkingUtensil_62634df2ad8f19b87d1b7935311a2ed0/tabletop_ur10e/scale008_pose003_0/partial_pc_03_7.npy"
+        },
+        {
+          "classification": "invalid_initialization",
+          "path": "sem_DrinkingUtensil_b6f30c63c946c286cf6897d8875cfd5e/tabletop_ur10e/scale006_pose003_0/partial_pc_00_6.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_FileCabinet_2f449bf1b7eade5772594f16694be05/tabletop_ur10e/scale006_pose003_0/partial_pc_00_7.npy"
+        },
+        {
+          "classification": "invalid_initialization",
+          "path": "sem_Fruit_b095a1c41447e9da887d2d6e4a6617b3/tabletop_ur10e/scale008_pose007_0/partial_pc_00_9.npy"
+        },
+        {
+          "classification": "invalid_initialization",
+          "path": "sem_LightBulb_f16f59cbfaa7de05ff2eead8e091e281/tabletop_ur10e/scale008_pose001_0/partial_pc_03_1.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_MilkCarton_2546e080ae36044d25924baa64fe1af2/tabletop_ur10e/scale012_pose001_0/partial_pc_00_1.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_MilkCarton_f5b5a24adc6826ace41b639931f9ca1/tabletop_ur10e/scale008_pose004_0/partial_pc_03_4.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_Piano_7f958d2487a826bcd11510e8e4b5518b/tabletop_ur10e/scale006_pose005_0/partial_pc_01_4.npy"
+        },
+        {
+          "classification": "invalid_initialization",
+          "path": "sem_PillBottle_c02a6e68b14b86f2b4f9bce692e6278d/tabletop_ur10e/scale006_pose001_0/partial_pc_02_6.npy"
+        },
+        {
+          "classification": "failure",
+          "path": "sem_Pizza_99dadb83b9bcf2498af30108ea9ccb6c/tabletop_ur10e/scale008_pose000_0/partial_pc_01_3.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_SodaCan_baaa4b9538caa7f06e20028ed3cb196e/tabletop_ur10e/scale008_pose004_0/partial_pc_01_8.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_Stapler_d5bf98bf95aa2148feade703f360c921/tabletop_ur10e/scale006_pose003_0/partial_pc_01_5.npy"
+        },
+        {
+          "classification": "invalid_initialization",
+          "path": "sem_TapeDispenser_844516b6fe304dafe36f6f37ca7926/tabletop_ur10e/scale008_pose003_0/partial_pc_00_2.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_TissueBox_ddf889fc432a0f869bc18b58d4f2bc4/tabletop_ur10e/scale006_pose001_0/partial_pc_02_3.npy"
+        },
+        {
+          "classification": "invalid_initialization",
+          "path": "sem_ToiletPaper_39ee1fdc9b314b4c8ad12ca6224f4ace/tabletop_ur10e/scale006_pose000_0/partial_pc_01_9.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_ToiletPaper_aa746904577597f7f133ddb7da6f13/tabletop_ur10e/scale006_pose002_0/partial_pc_02_7.npy"
+        },
+        {
+          "classification": "invalid_initialization",
+          "path": "sem_ToiletPaper_aa746904577597f7f133ddb7da6f13/tabletop_ur10e/scale012_pose001_0/partial_pc_00_6.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_Vase_8b56cc59b433b83d42266d3d768f0d70/tabletop_ur10e/scale006_pose000_0/partial_pc_03_9.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_Vase_941f7d490a6f146aff7e95552a1d6a0e/tabletop_ur10e/scale010_pose003_0/partial_pc_03_5.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_Vase_a35b3de8b261f5599ee3b9136941230/tabletop_ur10e/scale006_pose000_0/partial_pc_01_8.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_Vase_dcd904b1a65d36f25954af3f5fca0876/tabletop_ur10e/scale008_pose009_0/partial_pc_03_3.npy"
+        }
+      ]
+    },
+    "leap_tac3d": {
+      "aggregate_sha256": "34faf1e40d0697ea1e9859b88586d98a54ad6aacabd263dffbc1bcf055ce2ec6",
+      "counts": {
+        "execution_error": 0,
+        "failure": 5,
+        "invalid_initialization": 7,
+        "solver_degraded": 0,
+        "success": 88
+      },
+      "records": [
+        {
+          "classification": "success",
+          "path": "core_bottle_15787789482f045d8add95bf56d3d2fa/tabletop_ur10e/scale006_pose004_0/partial_pc_00_6.npy"
+        },
+        {
+          "classification": "failure",
+          "path": "core_bottle_547fa0085800c5c3846564a8a219239b/tabletop_ur10e/scale006_pose002_0/partial_pc_03_0.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_bottle_940b9e91a4a32a4130612f5c0ef21eb8/tabletop_ur10e/scale012_pose008_0/partial_pc_03_3.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_bottle_aa616bbf51ae233278d5828fe3be4b43/tabletop_ur10e/scale008_pose005_0/partial_pc_00_1.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_bottle_f079d5f4f4a8cd9318431871c8e05789/tabletop_ur10e/scale006_pose003_0/partial_pc_01_3.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_bottle_f079d5f4f4a8cd9318431871c8e05789/tabletop_ur10e/scale010_pose001_0/partial_pc_00_4.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_bowl_b65cbede8f483d51f7de4d28691515e1/tabletop_ur10e/scale010_pose000_0/partial_pc_00_0.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_camera_6d036fd1c70e5a5849493d905c02fa86/tabletop_ur10e/scale006_pose001_0/partial_pc_03_6.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_camera_6d036fd1c70e5a5849493d905c02fa86/tabletop_ur10e/scale006_pose004_0/partial_pc_03_9.npy"
+        },
+        {
+          "classification": "invalid_initialization",
+          "path": "core_camera_6d036fd1c70e5a5849493d905c02fa86/tabletop_ur10e/scale012_pose004_0/partial_pc_02_0.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_camera_7077395b60bf4aeb3cb44973ec1ffcf8/tabletop_ur10e/scale008_pose004_0/partial_pc_00_9.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_can_19fa6044dd31aa8e9487fa707cec1558/tabletop_ur10e/scale010_pose011_0/partial_pc_03_5.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_can_6b2c6961ad0891936193d9e76bb15876/tabletop_ur10e/scale006_pose004_0/partial_pc_00_5.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_can_a087f6b5ea424ccc785f06f424b9d06/tabletop_ur10e/scale006_pose002_0/partial_pc_02_3.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_can_b6c4d78363d965617cb2a55fa21392b7/tabletop_ur10e/scale010_pose007_0/partial_pc_00_2.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_can_f4108f92f3f12f99e3ecb6fd6ed1dd90/tabletop_ur10e/scale006_pose005_0/partial_pc_03_5.npy"
+        },
+        {
+          "classification": "invalid_initialization",
+          "path": "core_jar_275cc21fad6aa1b6bfa78a7d067c469c/tabletop_ur10e/scale010_pose008_0/partial_pc_03_8.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_jar_276bff32316ddd3eec0dc003f0209134/tabletop_ur10e/scale006_pose001_0/partial_pc_02_7.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_jar_281530bc7fbb122f30612f5c0ef21eb8/tabletop_ur10e/scale010_pose006_0/partial_pc_02_9.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_jar_32dc55c3e945384dbc5e533ab711fd24/tabletop_ur10e/scale010_pose008_0/partial_pc_02_2.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_jar_32dc55c3e945384dbc5e533ab711fd24/tabletop_ur10e/scale012_pose004_0/partial_pc_00_7.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_jar_37b06eeb82c1a486835e59296200e86/tabletop_ur10e/scale010_pose002_0/partial_pc_01_0.npy"
+        },
+        {
+          "classification": "failure",
+          "path": "core_jar_ac40978140155f2e5d878ba9ec3c0d6a/tabletop_ur10e/scale012_pose000_0/partial_pc_00_0.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_jar_ac40978140155f2e5d878ba9ec3c0d6a/tabletop_ur10e/scale012_pose006_0/partial_pc_02_8.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_jar_bd3408700fb963b436b0f2a1430e993a/tabletop_ur10e/scale012_pose002_0/partial_pc_02_3.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_jar_c0d3656a60fc5e3b16acbecd8bf6925d/tabletop_ur10e/scale006_pose008_0/partial_pc_02_2.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_jar_c81fa64321c8d49fb9be450193b1790b/tabletop_ur10e/scale010_pose002_0/partial_pc_01_7.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_mug_127944b6dabee1c9e20e92c5b8147e4a/tabletop_ur10e/scale010_pose001_0/partial_pc_00_2.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_mug_127944b6dabee1c9e20e92c5b8147e4a/tabletop_ur10e/scale010_pose009_0/partial_pc_03_5.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_mug_24651c3767aa5089e19f4cee87249aca/tabletop_ur10e/scale008_pose000_0/partial_pc_00_3.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_mug_73b8b6456221f4ea20d3c05c08e26f/tabletop_ur10e/scale012_pose000_0/partial_pc_00_6.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_mug_a3cd44bbd3ba5b019a4cbf5d3b79df06/tabletop_ur10e/scale006_pose001_0/partial_pc_01_4.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_mug_b6f30c63c946c286cf6897d8875cfd5e/tabletop_ur10e/scale010_pose000_0/partial_pc_00_2.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_mug_c0c130c04edabc657c2b66248f91b3d8/tabletop_ur10e/scale008_pose005_0/partial_pc_01_2.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_mug_ef24c302911bcde6ea6ff2182dd34668/tabletop_ur10e/scale006_pose000_0/partial_pc_00_4.npy"
+        },
+        {
+          "classification": "failure",
+          "path": "core_pillow_a3efd34601ea92facd6e752154c5afc0/tabletop_ur10e/scale008_pose001_0/partial_pc_00_1.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_pillow_d777679b4dd35c76a4136492f17b9a59/tabletop_ur10e/scale012_pose000_0/partial_pc_01_2.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_gd_box_poisson_020/tabletop_ur10e/scale006_pose000_0/partial_pc_01_9.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_gd_box_poisson_020/tabletop_ur10e/scale006_pose004_0/partial_pc_02_0.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_gd_can_poisson_000/tabletop_ur10e/scale008_pose002_0/partial_pc_02_6.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_gd_can_poisson_016/tabletop_ur10e/scale006_pose006_0/partial_pc_00_1.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_gd_jar_poisson_007/tabletop_ur10e/scale006_pose004_0/partial_pc_01_6.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_gd_pot_poisson_001/tabletop_ur10e/scale008_pose006_0/partial_pc_01_6.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_gd_pot_poisson_001/tabletop_ur10e/scale012_pose001_0/partial_pc_01_4.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_gd_rubber_duck_poisson_001/tabletop_ur10e/scale006_pose000_0/partial_pc_00_1.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_gd_soccer_ball_poisson_000/tabletop_ur10e/scale006_pose001_0/partial_pc_02_8.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_gd_tape_poisson_000/tabletop_ur10e/scale010_pose004_0/partial_pc_01_4.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_gd_tetra_pak_poisson_001/tabletop_ur10e/scale008_pose004_0/partial_pc_02_0.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_gd_tetra_pak_poisson_007/tabletop_ur10e/scale012_pose004_0/partial_pc_00_0.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_gd_toy_poisson_006/tabletop_ur10e/scale012_pose004_0/partial_pc_02_1.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_kit_BakingVanilla/tabletop_ur10e/scale006_pose003_0/partial_pc_01_3.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_kit_ChocoIcing/tabletop_ur10e/scale006_pose001_0/partial_pc_01_3.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_kit_HerbSalt/tabletop_ur10e/scale008_pose005_0/partial_pc_03_1.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_kit_HerbSalt/tabletop_ur10e/scale012_pose000_0/partial_pc_01_6.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_kit_HeringTin/tabletop_ur10e/scale012_pose001_0/partial_pc_02_3.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_kit_HotPot2/tabletop_ur10e/scale008_pose001_0/partial_pc_03_5.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_kit_PotatoeDumplings/tabletop_ur10e/scale010_pose003_0/partial_pc_02_7.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_kit_SoftCheese/tabletop_ur10e/scale010_pose000_0/partial_pc_01_5.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_ycb_013_apple/tabletop_ur10e/scale006_pose001_0/partial_pc_02_0.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_ycb_065_h_cups/tabletop_ur10e/scale012_pose004_0/partial_pc_03_4.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_ycb_072_c_toy_airplane/tabletop_ur10e/scale012_pose002_0/partial_pc_02_7.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_ycb_072_c_toy_airplane/tabletop_ur10e/scale012_pose005_0/partial_pc_00_9.npy"
+        },
+        {
+          "classification": "success",
+          "path": "mujoco_Cole_Hardware_Flower_Pot_1025/tabletop_ur10e/scale012_pose000_0/partial_pc_02_1.npy"
+        },
+        {
+          "classification": "failure",
+          "path": "mujoco_Crosley_Alarm_Clock_Vintage_Metal/tabletop_ur10e/scale006_pose000_0/partial_pc_00_7.npy"
+        },
+        {
+          "classification": "success",
+          "path": "mujoco_Jarrow_Glucosamine_Chondroitin_Combination_120_Caps/tabletop_ur10e/scale012_pose005_0/partial_pc_00_2.npy"
+        },
+        {
+          "classification": "success",
+          "path": "mujoco_Just_For_Men_Mustache_Beard_Brushin_Hair_Color_Gel_MediumDark_Brown_M40/tabletop_ur10e/scale012_pose001_0/partial_pc_01_8.npy"
+        },
+        {
+          "classification": "invalid_initialization",
+          "path": "mujoco_Just_For_Men_Shampoo_In_Haircolor_Darkest_Brown_50/tabletop_ur10e/scale008_pose004_0/partial_pc_00_6.npy"
+        },
+        {
+          "classification": "success",
+          "path": "mujoco_LACING_SHEEP/tabletop_ur10e/scale006_pose004_0/partial_pc_00_7.npy"
+        },
+        {
+          "classification": "success",
+          "path": "mujoco_Lego_Friends_Advent_Calendar/tabletop_ur10e/scale006_pose004_0/partial_pc_00_1.npy"
+        },
+        {
+          "classification": "success",
+          "path": "mujoco_Olive_Kids_Butterfly_Garden_Munch_n_Lunch_Bag/tabletop_ur10e/scale012_pose001_0/partial_pc_00_7.npy"
+        },
+        {
+          "classification": "invalid_initialization",
+          "path": "mujoco_Perricone_MD_Neuropeptide_Facial_Conformer/tabletop_ur10e/scale006_pose004_0/partial_pc_01_4.npy"
+        },
+        {
+          "classification": "success",
+          "path": "mujoco_Perricone_MD_Photo_Plasma/tabletop_ur10e/scale006_pose004_0/partial_pc_02_9.npy"
+        },
+        {
+          "classification": "success",
+          "path": "mujoco_Perricone_MD_The_Power_Treatments/tabletop_ur10e/scale006_pose000_0/partial_pc_00_6.npy"
+        },
+        {
+          "classification": "success",
+          "path": "mujoco_Target_Basket_Medium/tabletop_ur10e/scale010_pose005_0/partial_pc_01_0.npy"
+        },
+        {
+          "classification": "invalid_initialization",
+          "path": "sem_Book_cc0e864645032185d2d64d0098518cf/tabletop_ur10e/scale010_pose001_0/partial_pc_00_9.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_Camera_8c1d677d14d828b852ba02b2eec04f5e/tabletop_ur10e/scale010_pose002_0/partial_pc_02_0.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_Camera_fdcd83539b8db2c8b5635bf39f10a28a/tabletop_ur10e/scale008_pose003_0/partial_pc_02_2.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_Detergent_547fa0085800c5c3846564a8a219239b/tabletop_ur10e/scale008_pose001_0/partial_pc_01_9.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_DrinkingUtensil_5bbc259497af2fa15db77ed1f5c8b93/tabletop_ur10e/scale006_pose008_0/partial_pc_01_7.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_DrinkingUtensil_62634df2ad8f19b87d1b7935311a2ed0/tabletop_ur10e/scale008_pose003_0/partial_pc_03_7.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_DrinkingUtensil_b6f30c63c946c286cf6897d8875cfd5e/tabletop_ur10e/scale006_pose003_0/partial_pc_00_6.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_FileCabinet_2f449bf1b7eade5772594f16694be05/tabletop_ur10e/scale006_pose003_0/partial_pc_00_7.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_Fruit_b095a1c41447e9da887d2d6e4a6617b3/tabletop_ur10e/scale008_pose007_0/partial_pc_00_9.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_LightBulb_f16f59cbfaa7de05ff2eead8e091e281/tabletop_ur10e/scale008_pose001_0/partial_pc_03_1.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_MilkCarton_2546e080ae36044d25924baa64fe1af2/tabletop_ur10e/scale012_pose001_0/partial_pc_00_1.npy"
+        },
+        {
+          "classification": "invalid_initialization",
+          "path": "sem_MilkCarton_f5b5a24adc6826ace41b639931f9ca1/tabletop_ur10e/scale008_pose004_0/partial_pc_03_4.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_Piano_7f958d2487a826bcd11510e8e4b5518b/tabletop_ur10e/scale006_pose005_0/partial_pc_01_4.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_PillBottle_c02a6e68b14b86f2b4f9bce692e6278d/tabletop_ur10e/scale006_pose001_0/partial_pc_02_6.npy"
+        },
+        {
+          "classification": "failure",
+          "path": "sem_Pizza_99dadb83b9bcf2498af30108ea9ccb6c/tabletop_ur10e/scale008_pose000_0/partial_pc_01_3.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_SodaCan_baaa4b9538caa7f06e20028ed3cb196e/tabletop_ur10e/scale008_pose004_0/partial_pc_01_8.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_Stapler_d5bf98bf95aa2148feade703f360c921/tabletop_ur10e/scale006_pose003_0/partial_pc_01_5.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_TapeDispenser_844516b6fe304dafe36f6f37ca7926/tabletop_ur10e/scale008_pose003_0/partial_pc_00_2.npy"
+        },
+        {
+          "classification": "invalid_initialization",
+          "path": "sem_TissueBox_ddf889fc432a0f869bc18b58d4f2bc4/tabletop_ur10e/scale006_pose001_0/partial_pc_02_3.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_ToiletPaper_39ee1fdc9b314b4c8ad12ca6224f4ace/tabletop_ur10e/scale006_pose000_0/partial_pc_01_9.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_ToiletPaper_aa746904577597f7f133ddb7da6f13/tabletop_ur10e/scale006_pose002_0/partial_pc_02_7.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_ToiletPaper_aa746904577597f7f133ddb7da6f13/tabletop_ur10e/scale012_pose001_0/partial_pc_00_6.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_Vase_8b56cc59b433b83d42266d3d768f0d70/tabletop_ur10e/scale006_pose000_0/partial_pc_03_9.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_Vase_941f7d490a6f146aff7e95552a1d6a0e/tabletop_ur10e/scale010_pose003_0/partial_pc_03_5.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_Vase_a35b3de8b261f5599ee3b9136941230/tabletop_ur10e/scale006_pose000_0/partial_pc_01_8.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_Vase_dcd904b1a65d36f25954af3f5fca0876/tabletop_ur10e/scale008_pose009_0/partial_pc_03_3.npy"
+        }
+      ]
+    },
+    "shadow": {
+      "aggregate_sha256": "6c148f0712ab2a27e7c6a7d532fdab4f57754e53ace8099e875a42c2e42049d3",
+      "counts": {
+        "execution_error": 0,
+        "failure": 4,
+        "invalid_initialization": 21,
+        "solver_degraded": 9,
+        "success": 66
+      },
+      "records": [
+        {
+          "classification": "success",
+          "path": "core_bottle_15787789482f045d8add95bf56d3d2fa/tabletop_ur10e/scale006_pose004_0/partial_pc_00_6.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_bottle_547fa0085800c5c3846564a8a219239b/tabletop_ur10e/scale006_pose002_0/partial_pc_03_0.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_bottle_940b9e91a4a32a4130612f5c0ef21eb8/tabletop_ur10e/scale012_pose008_0/partial_pc_03_3.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_bottle_aa616bbf51ae233278d5828fe3be4b43/tabletop_ur10e/scale008_pose005_0/partial_pc_00_1.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_bottle_f079d5f4f4a8cd9318431871c8e05789/tabletop_ur10e/scale006_pose003_0/partial_pc_01_3.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_bottle_f079d5f4f4a8cd9318431871c8e05789/tabletop_ur10e/scale010_pose001_0/partial_pc_00_4.npy"
+        },
+        {
+          "classification": "invalid_initialization",
+          "path": "core_bowl_b65cbede8f483d51f7de4d28691515e1/tabletop_ur10e/scale010_pose000_0/partial_pc_00_0.npy"
+        },
+        {
+          "classification": "invalid_initialization",
+          "path": "core_camera_6d036fd1c70e5a5849493d905c02fa86/tabletop_ur10e/scale006_pose001_0/partial_pc_03_6.npy"
+        },
+        {
+          "classification": "invalid_initialization",
+          "path": "core_camera_6d036fd1c70e5a5849493d905c02fa86/tabletop_ur10e/scale006_pose004_0/partial_pc_03_9.npy"
+        },
+        {
+          "classification": "invalid_initialization",
+          "path": "core_camera_6d036fd1c70e5a5849493d905c02fa86/tabletop_ur10e/scale012_pose004_0/partial_pc_02_0.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_camera_7077395b60bf4aeb3cb44973ec1ffcf8/tabletop_ur10e/scale008_pose004_0/partial_pc_00_9.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_can_19fa6044dd31aa8e9487fa707cec1558/tabletop_ur10e/scale010_pose011_0/partial_pc_03_5.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_can_6b2c6961ad0891936193d9e76bb15876/tabletop_ur10e/scale006_pose004_0/partial_pc_00_5.npy"
+        },
+        {
+          "classification": "invalid_initialization",
+          "path": "core_can_a087f6b5ea424ccc785f06f424b9d06/tabletop_ur10e/scale006_pose002_0/partial_pc_02_3.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_can_b6c4d78363d965617cb2a55fa21392b7/tabletop_ur10e/scale010_pose007_0/partial_pc_00_2.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_can_f4108f92f3f12f99e3ecb6fd6ed1dd90/tabletop_ur10e/scale006_pose005_0/partial_pc_03_5.npy"
+        },
+        {
+          "classification": "invalid_initialization",
+          "path": "core_jar_275cc21fad6aa1b6bfa78a7d067c469c/tabletop_ur10e/scale010_pose008_0/partial_pc_03_8.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_jar_276bff32316ddd3eec0dc003f0209134/tabletop_ur10e/scale006_pose001_0/partial_pc_02_7.npy"
+        },
+        {
+          "classification": "invalid_initialization",
+          "path": "core_jar_281530bc7fbb122f30612f5c0ef21eb8/tabletop_ur10e/scale010_pose006_0/partial_pc_02_9.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_jar_32dc55c3e945384dbc5e533ab711fd24/tabletop_ur10e/scale010_pose008_0/partial_pc_02_2.npy"
+        },
+        {
+          "classification": "invalid_initialization",
+          "path": "core_jar_32dc55c3e945384dbc5e533ab711fd24/tabletop_ur10e/scale012_pose004_0/partial_pc_00_7.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_jar_37b06eeb82c1a486835e59296200e86/tabletop_ur10e/scale010_pose002_0/partial_pc_01_0.npy"
+        },
+        {
+          "classification": "invalid_initialization",
+          "path": "core_jar_ac40978140155f2e5d878ba9ec3c0d6a/tabletop_ur10e/scale012_pose000_0/partial_pc_00_0.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_jar_ac40978140155f2e5d878ba9ec3c0d6a/tabletop_ur10e/scale012_pose006_0/partial_pc_02_8.npy"
+        },
+        {
+          "classification": "invalid_initialization",
+          "path": "core_jar_bd3408700fb963b436b0f2a1430e993a/tabletop_ur10e/scale012_pose002_0/partial_pc_02_3.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_jar_c0d3656a60fc5e3b16acbecd8bf6925d/tabletop_ur10e/scale006_pose008_0/partial_pc_02_2.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_jar_c81fa64321c8d49fb9be450193b1790b/tabletop_ur10e/scale010_pose002_0/partial_pc_01_7.npy"
+        },
+        {
+          "classification": "solver_degraded",
+          "path": "core_mug_127944b6dabee1c9e20e92c5b8147e4a/tabletop_ur10e/scale010_pose001_0/partial_pc_00_2.npy"
+        },
+        {
+          "classification": "solver_degraded",
+          "path": "core_mug_127944b6dabee1c9e20e92c5b8147e4a/tabletop_ur10e/scale010_pose009_0/partial_pc_03_5.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_mug_24651c3767aa5089e19f4cee87249aca/tabletop_ur10e/scale008_pose000_0/partial_pc_00_3.npy"
+        },
+        {
+          "classification": "failure",
+          "path": "core_mug_73b8b6456221f4ea20d3c05c08e26f/tabletop_ur10e/scale012_pose000_0/partial_pc_00_6.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_mug_a3cd44bbd3ba5b019a4cbf5d3b79df06/tabletop_ur10e/scale006_pose001_0/partial_pc_01_4.npy"
+        },
+        {
+          "classification": "solver_degraded",
+          "path": "core_mug_b6f30c63c946c286cf6897d8875cfd5e/tabletop_ur10e/scale010_pose000_0/partial_pc_00_2.npy"
+        },
+        {
+          "classification": "invalid_initialization",
+          "path": "core_mug_c0c130c04edabc657c2b66248f91b3d8/tabletop_ur10e/scale008_pose005_0/partial_pc_01_2.npy"
+        },
+        {
+          "classification": "success",
+          "path": "core_mug_ef24c302911bcde6ea6ff2182dd34668/tabletop_ur10e/scale006_pose000_0/partial_pc_00_4.npy"
+        },
+        {
+          "classification": "invalid_initialization",
+          "path": "core_pillow_a3efd34601ea92facd6e752154c5afc0/tabletop_ur10e/scale008_pose001_0/partial_pc_00_1.npy"
+        },
+        {
+          "classification": "failure",
+          "path": "core_pillow_d777679b4dd35c76a4136492f17b9a59/tabletop_ur10e/scale012_pose000_0/partial_pc_01_2.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_gd_box_poisson_020/tabletop_ur10e/scale006_pose000_0/partial_pc_01_9.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_gd_box_poisson_020/tabletop_ur10e/scale006_pose004_0/partial_pc_02_0.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_gd_can_poisson_000/tabletop_ur10e/scale008_pose002_0/partial_pc_02_6.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_gd_can_poisson_016/tabletop_ur10e/scale006_pose006_0/partial_pc_00_1.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_gd_jar_poisson_007/tabletop_ur10e/scale006_pose004_0/partial_pc_01_6.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_gd_pot_poisson_001/tabletop_ur10e/scale008_pose006_0/partial_pc_01_6.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_gd_pot_poisson_001/tabletop_ur10e/scale012_pose001_0/partial_pc_01_4.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_gd_rubber_duck_poisson_001/tabletop_ur10e/scale006_pose000_0/partial_pc_00_1.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_gd_soccer_ball_poisson_000/tabletop_ur10e/scale006_pose001_0/partial_pc_02_8.npy"
+        },
+        {
+          "classification": "solver_degraded",
+          "path": "ddg_gd_tape_poisson_000/tabletop_ur10e/scale010_pose004_0/partial_pc_01_4.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_gd_tetra_pak_poisson_001/tabletop_ur10e/scale008_pose004_0/partial_pc_02_0.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_gd_tetra_pak_poisson_007/tabletop_ur10e/scale012_pose004_0/partial_pc_00_0.npy"
+        },
+        {
+          "classification": "solver_degraded",
+          "path": "ddg_gd_toy_poisson_006/tabletop_ur10e/scale012_pose004_0/partial_pc_02_1.npy"
+        },
+        {
+          "classification": "invalid_initialization",
+          "path": "ddg_kit_BakingVanilla/tabletop_ur10e/scale006_pose003_0/partial_pc_01_3.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_kit_ChocoIcing/tabletop_ur10e/scale006_pose001_0/partial_pc_01_3.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_kit_HerbSalt/tabletop_ur10e/scale008_pose005_0/partial_pc_03_1.npy"
+        },
+        {
+          "classification": "solver_degraded",
+          "path": "ddg_kit_HerbSalt/tabletop_ur10e/scale012_pose000_0/partial_pc_01_6.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_kit_HeringTin/tabletop_ur10e/scale012_pose001_0/partial_pc_02_3.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_kit_HotPot2/tabletop_ur10e/scale008_pose001_0/partial_pc_03_5.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_kit_PotatoeDumplings/tabletop_ur10e/scale010_pose003_0/partial_pc_02_7.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_kit_SoftCheese/tabletop_ur10e/scale010_pose000_0/partial_pc_01_5.npy"
+        },
+        {
+          "classification": "success",
+          "path": "ddg_ycb_013_apple/tabletop_ur10e/scale006_pose001_0/partial_pc_02_0.npy"
+        },
+        {
+          "classification": "invalid_initialization",
+          "path": "ddg_ycb_065_h_cups/tabletop_ur10e/scale012_pose004_0/partial_pc_03_4.npy"
+        },
+        {
+          "classification": "invalid_initialization",
+          "path": "ddg_ycb_072_c_toy_airplane/tabletop_ur10e/scale012_pose002_0/partial_pc_02_7.npy"
+        },
+        {
+          "classification": "invalid_initialization",
+          "path": "ddg_ycb_072_c_toy_airplane/tabletop_ur10e/scale012_pose005_0/partial_pc_00_9.npy"
+        },
+        {
+          "classification": "invalid_initialization",
+          "path": "mujoco_Cole_Hardware_Flower_Pot_1025/tabletop_ur10e/scale012_pose000_0/partial_pc_02_1.npy"
+        },
+        {
+          "classification": "success",
+          "path": "mujoco_Crosley_Alarm_Clock_Vintage_Metal/tabletop_ur10e/scale006_pose000_0/partial_pc_00_7.npy"
+        },
+        {
+          "classification": "solver_degraded",
+          "path": "mujoco_Jarrow_Glucosamine_Chondroitin_Combination_120_Caps/tabletop_ur10e/scale012_pose005_0/partial_pc_00_2.npy"
+        },
+        {
+          "classification": "success",
+          "path": "mujoco_Just_For_Men_Mustache_Beard_Brushin_Hair_Color_Gel_MediumDark_Brown_M40/tabletop_ur10e/scale012_pose001_0/partial_pc_01_8.npy"
+        },
+        {
+          "classification": "success",
+          "path": "mujoco_Just_For_Men_Shampoo_In_Haircolor_Darkest_Brown_50/tabletop_ur10e/scale008_pose004_0/partial_pc_00_6.npy"
+        },
+        {
+          "classification": "success",
+          "path": "mujoco_LACING_SHEEP/tabletop_ur10e/scale006_pose004_0/partial_pc_00_7.npy"
+        },
+        {
+          "classification": "success",
+          "path": "mujoco_Lego_Friends_Advent_Calendar/tabletop_ur10e/scale006_pose004_0/partial_pc_00_1.npy"
+        },
+        {
+          "classification": "invalid_initialization",
+          "path": "mujoco_Olive_Kids_Butterfly_Garden_Munch_n_Lunch_Bag/tabletop_ur10e/scale012_pose001_0/partial_pc_00_7.npy"
+        },
+        {
+          "classification": "success",
+          "path": "mujoco_Perricone_MD_Neuropeptide_Facial_Conformer/tabletop_ur10e/scale006_pose004_0/partial_pc_01_4.npy"
+        },
+        {
+          "classification": "success",
+          "path": "mujoco_Perricone_MD_Photo_Plasma/tabletop_ur10e/scale006_pose004_0/partial_pc_02_9.npy"
+        },
+        {
+          "classification": "success",
+          "path": "mujoco_Perricone_MD_The_Power_Treatments/tabletop_ur10e/scale006_pose000_0/partial_pc_00_6.npy"
+        },
+        {
+          "classification": "failure",
+          "path": "mujoco_Target_Basket_Medium/tabletop_ur10e/scale010_pose005_0/partial_pc_01_0.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_Book_cc0e864645032185d2d64d0098518cf/tabletop_ur10e/scale010_pose001_0/partial_pc_00_9.npy"
+        },
+        {
+          "classification": "invalid_initialization",
+          "path": "sem_Camera_8c1d677d14d828b852ba02b2eec04f5e/tabletop_ur10e/scale010_pose002_0/partial_pc_02_0.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_Camera_fdcd83539b8db2c8b5635bf39f10a28a/tabletop_ur10e/scale008_pose003_0/partial_pc_02_2.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_Detergent_547fa0085800c5c3846564a8a219239b/tabletop_ur10e/scale008_pose001_0/partial_pc_01_9.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_DrinkingUtensil_5bbc259497af2fa15db77ed1f5c8b93/tabletop_ur10e/scale006_pose008_0/partial_pc_01_7.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_DrinkingUtensil_62634df2ad8f19b87d1b7935311a2ed0/tabletop_ur10e/scale008_pose003_0/partial_pc_03_7.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_DrinkingUtensil_b6f30c63c946c286cf6897d8875cfd5e/tabletop_ur10e/scale006_pose003_0/partial_pc_00_6.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_FileCabinet_2f449bf1b7eade5772594f16694be05/tabletop_ur10e/scale006_pose003_0/partial_pc_00_7.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_Fruit_b095a1c41447e9da887d2d6e4a6617b3/tabletop_ur10e/scale008_pose007_0/partial_pc_00_9.npy"
+        },
+        {
+          "classification": "solver_degraded",
+          "path": "sem_LightBulb_f16f59cbfaa7de05ff2eead8e091e281/tabletop_ur10e/scale008_pose001_0/partial_pc_03_1.npy"
+        },
+        {
+          "classification": "failure",
+          "path": "sem_MilkCarton_2546e080ae36044d25924baa64fe1af2/tabletop_ur10e/scale012_pose001_0/partial_pc_00_1.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_MilkCarton_f5b5a24adc6826ace41b639931f9ca1/tabletop_ur10e/scale008_pose004_0/partial_pc_03_4.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_Piano_7f958d2487a826bcd11510e8e4b5518b/tabletop_ur10e/scale006_pose005_0/partial_pc_01_4.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_PillBottle_c02a6e68b14b86f2b4f9bce692e6278d/tabletop_ur10e/scale006_pose001_0/partial_pc_02_6.npy"
+        },
+        {
+          "classification": "solver_degraded",
+          "path": "sem_Pizza_99dadb83b9bcf2498af30108ea9ccb6c/tabletop_ur10e/scale008_pose000_0/partial_pc_01_3.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_SodaCan_baaa4b9538caa7f06e20028ed3cb196e/tabletop_ur10e/scale008_pose004_0/partial_pc_01_8.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_Stapler_d5bf98bf95aa2148feade703f360c921/tabletop_ur10e/scale006_pose003_0/partial_pc_01_5.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_TapeDispenser_844516b6fe304dafe36f6f37ca7926/tabletop_ur10e/scale008_pose003_0/partial_pc_00_2.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_TissueBox_ddf889fc432a0f869bc18b58d4f2bc4/tabletop_ur10e/scale006_pose001_0/partial_pc_02_3.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_ToiletPaper_39ee1fdc9b314b4c8ad12ca6224f4ace/tabletop_ur10e/scale006_pose000_0/partial_pc_01_9.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_ToiletPaper_aa746904577597f7f133ddb7da6f13/tabletop_ur10e/scale006_pose002_0/partial_pc_02_7.npy"
+        },
+        {
+          "classification": "invalid_initialization",
+          "path": "sem_ToiletPaper_aa746904577597f7f133ddb7da6f13/tabletop_ur10e/scale012_pose001_0/partial_pc_00_6.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_Vase_8b56cc59b433b83d42266d3d768f0d70/tabletop_ur10e/scale006_pose000_0/partial_pc_03_9.npy"
+        },
+        {
+          "classification": "invalid_initialization",
+          "path": "sem_Vase_941f7d490a6f146aff7e95552a1d6a0e/tabletop_ur10e/scale010_pose003_0/partial_pc_03_5.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_Vase_a35b3de8b261f5599ee3b9136941230/tabletop_ur10e/scale006_pose000_0/partial_pc_01_8.npy"
+        },
+        {
+          "classification": "success",
+          "path": "sem_Vase_dcd904b1a65d36f25954af3f5fca0876/tabletop_ur10e/scale008_pose009_0/partial_pc_03_3.npy"
+        }
+      ]
+    }
+  },
+  "schema_version": 1
+}

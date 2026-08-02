@@ -14,10 +14,12 @@ Apply this rule to `README.md`, public examples, support claims, licenses, attri
 
 - The repository currently provides no project-wide license. Third-party submodules, hand descriptions/meshes, and bundled data remain subject to their own licenses and permission records.
 - Preserve upstream license and attribution files. Do not invent an authorizing party, date, scope, copyright holder, import commit, or permission statement.
-- Treat the DGN/BODex example object's redistribution evidence and the local LEAP Tac3D mesh provenance as unresolved until primary records are added.
+- For the bundled DGN quick subset, record the original DGN 2k source and manifest checksums without adding unsupported
+  authorization claims. Local LEAP Tac3D mesh provenance remains unresolved until primary records are added.
 - Reachability is not permission: an unused asset may still have legal constraints, and an upstream license for a similar asset does not prove coverage of a local derivative.
 - Ask before deleting retained asset candidates or changing public redistribution status.
-- When adding or replacing an asset, record source, exact version/commit, modifications, license, redistribution basis, and checksums where practical.
+- When adding or replacing an asset, record the available source facts and checksums without inventing missing metadata.
+  The accepted DGN quick-subset contract requires its original DGN 2k source plus the machine-readable fixture manifest.
 
 ## Load on demand
 

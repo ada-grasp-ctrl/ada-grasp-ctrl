@@ -16,6 +16,7 @@ from ada_grasp_ctrl.schema import (
     validate_raw_record,
     validate_scene_record,
 )
+from ada_grasp_ctrl.utils.robots.base import RobotFactory
 
 
 class ExactSchemaContractTest(unittest.TestCase):
@@ -204,16 +205,24 @@ class ExactSchemaContractTest(unittest.TestCase):
         with self.assertRaisesRegex(SchemaError, "aligned with contacts"):
             validate_control_record(misaligned, "control.npy")
 
-    def test_restored_fixed_matrix_satisfies_exact_control_schema(self):
-        """Validate all 15 trajectories when approved external golden evidence is restored."""
+    def test_bundled_quick_records_satisfy_exact_grasp_schema(self):
+        """Validate all 300 checked-in quick records and configured joint orders."""
         project_root = Path(__file__).resolve().parents[1]
-        golden_root = project_root / "release" / "golden" / "fixed_matrix"
-        if not golden_root.exists():
-            self.skipTest("approved external release/golden evidence is not restored")
-        paths = sorted(golden_root.rglob("*.npy"))
-        self.assertEqual(len(paths), 15)
-        for path in paths:
-            validate_control_record(load_npy_record(path), path)
+        for hand in ("shadow", "allegro", "leap_tac3d"):
+            prefix = "rh_" if hand != "allegro" else ""
+            robot = RobotFactory.create_robot(robot_type=f"dummy_arm_{hand}", prefix=prefix)
+            paths = sorted((project_root / f"examples/data/{hand}/dummy_arm").rglob("*.npy"))
+            self.assertEqual(len(paths), 100)
+            for path in paths:
+                record = load_npy_record(path)
+                self.assertEqual(record.get("schema_version"), 1)
+                validate_grasp_record(
+                    record,
+                    path,
+                    expected_joint_dim=robot.n_dof,
+                    expected_joint_names=robot.dof_names,
+                    require_joint_names=True,
+                )
 
 
 if __name__ == "__main__":

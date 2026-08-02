@@ -1,0 +1,18 @@
+<mujoco model="MuJoCo Model">
+  <compiler angle="radian" meshdir="."/>
+
+  <asset>
+    <mesh name="convex_piece_001.obj" file="meshes/convex_piece_001.obj"/>
+    <mesh name="convex_piece_002.obj" file="meshes/convex_piece_002.obj"/>
+    <mesh name="convex_piece_000.obj" file="meshes/convex_piece_000.obj"/>
+  </asset>
+
+  <worldbody>
+    <geom name="object_visual_0" type="mesh" contype="0" conaffinity="0" density="0" mesh="convex_piece_001.obj"/>
+    <geom name="object_collision_0" type="mesh" mesh="convex_piece_001.obj"/>
+    <geom name="object_visual_1" type="mesh" contype="0" conaffinity="0" density="0" mesh="convex_piece_002.obj"/>
+    <geom name="object_collision_1" type="mesh" mesh="convex_piece_002.obj"/>
+    <geom name="object_visual_2" type="mesh" contype="0" conaffinity="0" density="0" mesh="convex_piece_000.obj"/>
+    <geom name="object_collision_2" type="mesh" mesh="convex_piece_000.obj"/>
+  </worldbody>
+</mujoco>

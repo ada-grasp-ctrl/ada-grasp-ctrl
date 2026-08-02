@@ -9,17 +9,19 @@ import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
 from script.build_example_fixtures import (
     HAND_NAMES,
-    OBJECT_RELATIVE,
-    SAMPLE_RELATIVE,
+    LEGACY_OBJECT_ID,
     FixtureBuildError,
     build_fixtures,
 )
+from script.audit_example_fixtures import audit_manifest
 from script.run_ablation_baselines import ExperimentConfig, ExperimentRunnerError, run_experiment
+from ada_grasp_ctrl.utils.robots.base import RobotFactory
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -46,105 +48,164 @@ class FixtureBuilderTest(unittest.TestCase):
         self.temporary.cleanup()
 
     @staticmethod
-    def _record(dimension: int, *, dummy_arm: bool) -> dict[str, object]:
-        """Build one minimally valid archived source record.
+    def _record(hand: str, object_path: Path, pose: np.ndarray, scale: float) -> dict[str, object]:
+        """Build one valid dummy-arm source record.
 
         Args:
-            dimension: Joint-position dimension.
-            dummy_arm: Whether to add dummy-arm-only fields.
+            hand: Maintained short hand name.
+            object_path: Absolute processed-object directory.
+            pose: Seven-value object pose.
+            scale: Positive object scale.
 
         Returns:
             NumPy record mapping.
         """
+        prefix = "rh_" if hand != "allegro" else ""
+        robot = RobotFactory.create_robot(robot_type=f"dummy_arm_{hand}", prefix=prefix)
+        dimension = robot.n_dof
         qpos = np.linspace(0.0, 1.0, dimension)
-        record: dict[str, object] = {
-            "obj_path": "/archive/original-object",
-            "obj_pose": np.array([0.0, 0.0, 0.1, 1.0, 0.0, 0.0, 0.0]),
-            "obj_scale": 0.06,
+        return {
+            "obj_path": str(object_path),
+            "obj_pose": pose,
+            "obj_scale": scale,
             "pregrasp_qpos": qpos,
             "grasp_qpos": qpos + 1.0,
             "squeeze_qpos": qpos + 2.0,
+            "joint_names": list(robot.dof_names),
+            "approach_qpos": np.stack((qpos, qpos + 0.5)),
         }
-        if dummy_arm:
-            record.update(
-                {
-                    "joint_names": [f"joint_{index}" for index in range(dimension)],
-                    "approach_qpos": np.stack((qpos, qpos + 0.5)),
-                }
-            )
-        return record
 
-    def _source_roots(self) -> tuple[dict[str, Path], dict[str, Path]]:
-        """Write complete external source trees for all maintained hands.
+    def _sources(self) -> tuple[dict[str, Path], Path, Path]:
+        """Write two-record source trees, DGN assets, and maintained full fixtures.
 
         Returns:
-            Formatted and dummy-arm root mappings.
+            Dummy-arm roots, DGN source root, and destination checkout root.
         """
-        formatted_roots = {}
+        object_ids = (LEGACY_OBJECT_ID, "core_test_second")
+        relative_paths = (
+            Path(object_ids[0]) / "tabletop_ur10e/scale006_pose004_0/partial_pc_00_6.npy",
+            Path(object_ids[1]) / "tabletop_ur10e/scale008_pose001_0/partial_pc_01_0.npy",
+        )
+        dgn_root = self.root / "external/DGN_2k"
+        poses = (
+            np.array([0.0, 0.0, 0.1, 1.0, 0.0, 0.0, 0.0]),
+            np.array([0.1, 0.0, 0.2, 1.0, 0.0, 0.0, 0.0]),
+        )
+        scales = (0.06, 0.08)
+        for object_id, pose, scale, relative in zip(object_ids, poses, scales, relative_paths):
+            processed = dgn_root / "processed_data" / object_id
+            required = (
+                processed / "info/simplified.json",
+                processed / "mesh/simplified.obj",
+                processed / "urdf/coacd.xml",
+                processed / "urdf/coacd.urdf",
+                processed / "urdf/meshes/convex_piece_000.obj",
+            )
+            for path in required:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("{}\n", encoding="utf-8")
+            scene_path = dgn_root / "scene_cfg" / object_id / relative.parts[1] / f"{relative.parts[2]}.npy"
+            scene_path.parent.mkdir(parents=True, exist_ok=True)
+            np.save(
+                scene_path,
+                {
+                    "scene": {
+                        object_id: {
+                            "file_path": f"../../../processed_data/{object_id}/mesh/simplified.obj",
+                            "xml_path": f"../../../processed_data/{object_id}/urdf/coacd.xml",
+                            "urdf_path": f"../../../processed_data/{object_id}/urdf/coacd.urdf",
+                            "info_path": f"../../../processed_data/{object_id}/info/simplified.json",
+                            "pose": pose,
+                            "scale": np.full(3, scale),
+                        }
+                    },
+                    "task": {"obj_name": object_id},
+                },
+            )
+
         dummy_arm_roots = {}
-        dimensions = {"shadow": 29, "allegro": 23, "leap_tac3d": 23}
         for hand in HAND_NAMES:
-            formatted_root = self.root / "archive/formatted" / hand
             dummy_arm_root = self.root / "archive/dummy-arm" / hand
-            for root, record in (
-                (formatted_root, self._record(dimensions[hand], dummy_arm=False)),
-                (dummy_arm_root, self._record(dimensions[hand] - 1, dummy_arm=True)),
-            ):
-                source = root / SAMPLE_RELATIVE
+            for relative, object_id, pose, scale in zip(relative_paths, object_ids, poses, scales):
+                source = dummy_arm_root / relative
                 source.parent.mkdir(parents=True, exist_ok=True)
-                np.save(source, record)
-            formatted_roots[hand] = formatted_root.resolve()
+                np.save(source, self._record(hand, dgn_root / "processed_data" / object_id, pose, scale))
             dummy_arm_roots[hand] = dummy_arm_root.resolve()
-        return formatted_roots, dummy_arm_roots
 
-    def test_builder_uses_explicit_sources_outside_repository_output(self) -> None:
-        """Generate every fixture without consulting the checkout's output tree."""
-        formatted_roots, dummy_arm_roots = self._source_roots()
-        destination = self.root / "generated/examples/data"
-
-        generated = build_fixtures(formatted_roots, dummy_arm_roots, destination)
-
-        self.assertEqual(len(generated), 10)
-        self.assertTrue(all(path.is_file() for path in generated))
+        project_root = self.root / "checkout"
+        data_root = project_root / "examples/data"
+        data_root.mkdir(parents=True)
+        np.save(
+            data_root / "scene.npy",
+            {"scene": {"target": {"file_path": f"../assets/object/{LEGACY_OBJECT_ID}/mesh/simplified.obj"}}},
+        )
         for hand in HAND_NAMES:
-            formatted = np.load(destination / hand / "formatted/grasp.npy", allow_pickle=True).item()
-            dummy_arm = np.load(destination / hand / "dummy_arm/grasp.npy", allow_pickle=True).item()
-            raw = np.load(destination / hand / "raw/learning.npy", allow_pickle=True).item()
-            self.assertEqual(formatted["obj_path"], str(OBJECT_RELATIVE))
-            self.assertEqual(dummy_arm["obj_path"], str(OBJECT_RELATIVE))
-            self.assertEqual(formatted["schema_version"], 1)
-            self.assertEqual(dummy_arm["schema_version"], 1)
-            self.assertEqual(raw["schema_version"], 1)
+            formatted = data_root / hand / "formatted/grasp.npy"
+            formatted.parent.mkdir(parents=True, exist_ok=True)
+            np.save(
+                formatted,
+                self._record(hand, Path(f"examples/assets/object/{LEGACY_OBJECT_ID}"), poses[0], scales[0]),
+            )
+        legacy = project_root / "examples/assets/object" / LEGACY_OBJECT_ID / "mesh"
+        legacy.mkdir(parents=True)
+        (legacy / "simplified.obj").write_text("legacy\n", encoding="utf-8")
+        return dummy_arm_roots, dgn_root.resolve(), project_root
+
+    def test_builder_creates_exact_manifest_and_auditable_subset(self) -> None:
+        """Generate and audit the selected fixtures without consulting repository output."""
+        dummy_arm_roots, dgn_root, project_root = self._sources()
+
+        with patch("script.build_example_fixtures.EXPECTED_RECORDS_PER_HAND", 2):
+            with patch("script.build_example_fixtures.EXPECTED_OBJECT_COUNT", 2):
+                manifest_path = build_fixtures(dummy_arm_roots, dgn_root, project_root)
+        attribution = project_root / "examples/assets/object/DGN_2k/ATTRIBUTION.md"
+        attribution.write_text("DGN 2k\n", encoding="utf-8")
+
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        self.assertEqual(manifest["counts"]["grasp_records"], 6)
+        self.assertEqual(manifest["counts"]["object_ids"], 2)
+        self.assertFalse((project_root / "examples/assets/object" / LEGACY_OBJECT_ID).exists())
+        for hand in HAND_NAMES:
+            records = sorted((project_root / f"examples/data/{hand}/dummy_arm").rglob("*.npy"))
+            self.assertEqual(len(records), 2)
+            self.assertTrue(all(np.load(path, allow_pickle=True).item()["schema_version"] == 1 for path in records))
+        with patch("script.audit_example_fixtures.EXPECTED_RECORDS_PER_HAND", 2):
+            with patch("script.audit_example_fixtures.EXPECTED_OBJECT_COUNT", 2):
+                counts = audit_manifest(manifest_path, project_root)
+        self.assertEqual(counts["grasp_records"], 6)
 
     def test_builder_preflights_all_sources_before_writing(self) -> None:
         """Leave the destination untouched when one archived sample is missing."""
-        formatted_roots, dummy_arm_roots = self._source_roots()
-        (dummy_arm_roots["allegro"] / SAMPLE_RELATIVE).unlink()
-        destination = self.root / "generated/examples/data"
+        dummy_arm_roots, dgn_root, project_root = self._sources()
+        next(dummy_arm_roots["allegro"].rglob("*.npy")).unlink()
 
-        with self.assertRaisesRegex(FixtureBuildError, "Fixture source is missing"):
-            build_fixtures(formatted_roots, dummy_arm_roots, destination)
+        with patch("script.build_example_fixtures.EXPECTED_RECORDS_PER_HAND", 2):
+            with patch("script.build_example_fixtures.EXPECTED_OBJECT_COUNT", 2):
+                with self.assertRaisesRegex(FixtureBuildError, "contains 1 .npy records"):
+                    build_fixtures(dummy_arm_roots, dgn_root, project_root)
 
-        self.assertFalse(destination.exists())
+        self.assertFalse((project_root / "examples/quick_manifest.json").exists())
 
     def test_builder_rejects_relative_source_roots(self) -> None:
         """Do not make fixture regeneration depend on the caller's CWD."""
-        formatted_roots, dummy_arm_roots = self._source_roots()
-        formatted_roots["shadow"] = Path("relative/shadow")
+        dummy_arm_roots, dgn_root, project_root = self._sources()
+        dummy_arm_roots["shadow"] = Path("relative/shadow")
 
         with self.assertRaisesRegex(FixtureBuildError, "must be absolute"):
-            build_fixtures(formatted_roots, dummy_arm_roots, self.root / "destination")
+            build_fixtures(dummy_arm_roots, dgn_root, project_root)
 
     def test_builder_reports_nonnumeric_archived_qpos(self) -> None:
         """Convert object-typed finite-check failures into an actionable error."""
-        formatted_roots, dummy_arm_roots = self._source_roots()
-        malformed_path = formatted_roots["shadow"] / SAMPLE_RELATIVE
+        dummy_arm_roots, dgn_root, project_root = self._sources()
+        malformed_path = next(dummy_arm_roots["shadow"].rglob("*.npy"))
         malformed = np.load(malformed_path, allow_pickle=True).item()
         malformed["pregrasp_qpos"] = np.array(["not-a-number"], dtype=object)
         np.save(malformed_path, malformed)
 
-        with self.assertRaisesRegex(FixtureBuildError, "invalid finite one-dimensional pregrasp_qpos"):
-            build_fixtures(formatted_roots, dummy_arm_roots, self.root / "destination")
+        with patch("script.build_example_fixtures.EXPECTED_RECORDS_PER_HAND", 2):
+            with patch("script.build_example_fixtures.EXPECTED_OBJECT_COUNT", 2):
+                with self.assertRaisesRegex(FixtureBuildError, "Invalid dummy-arm fixture source"):
+                    build_fixtures(dummy_arm_roots, dgn_root, project_root)
 
 
 class AblationRunnerTest(unittest.TestCase):
@@ -307,10 +368,42 @@ class RepositoryHygieneTest(unittest.TestCase):
 
     def test_project_data_formats_are_not_blanket_ignored(self) -> None:
         """Keep maintained NumPy, MJCF/XML, and mesh/STL files eligible for Git."""
-        for path in ("fixtures/sample.npy", "assets/hand/new_hand.xml", "assets/hand/mesh/finger.stl"):
+        for path in (
+            "fixtures/sample.npy",
+            "assets/hand/new_hand.xml",
+            "assets/hand/mesh/finger.stl",
+            "examples/assets/object/DGN_2k/processed_data/object/info/simplified.json",
+        ):
             with self.subTest(path=path):
                 completed = self._git("check-ignore", "--no-index", "--quiet", path)
                 self.assertEqual(completed.returncode, 1, f"Unexpectedly ignored: {path}")
+
+    def test_maintained_release_automation_is_quick_only(self) -> None:
+        """Keep scripts, workflows, README, and normative release rules on the quick gate."""
+        paths = (
+            PROJECT_ROOT / "script/run_release_gate.sh",
+            PROJECT_ROOT / ".github/workflows/ci.yml",
+            PROJECT_ROOT / ".github/workflows/release.yml",
+            PROJECT_ROOT / "README.md",
+            PROJECT_ROOT / "agents/rules/testing-release.md",
+        )
+        removed_tokens = (
+            "release300",
+            "release_input_root",
+            "ADA_GRASP_CTRL_RELEASE_INPUT_ROOT",
+            "run_release_gate.sh fixed",
+            "run_release_gate.sh wheel",
+            "run_release_gate.sh portable",
+            "run_release_gate.sh all",
+        )
+        for path in paths:
+            text = path.read_text(encoding="utf-8")
+            with self.subTest(path=path):
+                self.assertTrue(all(token not in text for token in removed_tokens))
+        for workflow in (PROJECT_ROOT / ".github/workflows/ci.yml", PROJECT_ROOT / ".github/workflows/release.yml"):
+            text = workflow.read_text(encoding="utf-8")
+            self.assertIn("matrix:", text)
+            self.assertIn("hand: [shadow, allegro, leap_tac3d]", text)
 
 
 if __name__ == "__main__":

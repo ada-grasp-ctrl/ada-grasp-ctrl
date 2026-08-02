@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
-import hashlib
+import json
 from pathlib import Path
-import re
 import unittest
 import xml.etree.ElementTree as ET
 
+from script.audit_example_fixtures import audit_manifest
+from script.build_example_fixtures import sha256_file
+from script.validate_quick_results import classification_digest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-OBJECT_ROOT = PROJECT_ROOT / "examples/assets/object/core_bottle_15787789482f045d8add95bf56d3d2fa"
+OBJECT_ROOT = PROJECT_ROOT / "examples/assets/object/DGN_2k"
+QUICK_MANIFEST = PROJECT_ROOT / "examples/quick_manifest.json"
+EXPECTED_STATUS = PROJECT_ROOT / "examples/quick_expected_status.json"
 ACTIVE_HAND_XML = (
     PROJECT_ROOT / "assets/hand/allegro/right_hand.xml",
     PROJECT_ROOT / "assets/hand/dummy_arm_allegro/right.xml",
@@ -48,16 +52,30 @@ REMOVED_HAND_ASSETS = (
 class ReleaseAssetTest(unittest.TestCase):
     """Protect release assets from stale records and broken mesh paths."""
 
-    def test_object_attribution_checksums_match_files(self) -> None:
-        """Verify every object checksum recorded in the attribution file."""
+    def test_quick_manifest_audits_all_bundled_dgn_files(self) -> None:
+        """Verify the exact 3x100 fixture and 89-object checksum inventory."""
+        counts = audit_manifest(QUICK_MANIFEST, PROJECT_ROOT)
+
+        self.assertEqual(counts["grasp_records"], 300)
+        self.assertEqual(counts["object_ids"], 89)
         attribution = (OBJECT_ROOT / "ATTRIBUTION.md").read_text(encoding="utf-8")
-        records = re.findall(r"^([0-9a-f]{64})  (.+)$", attribution, flags=re.MULTILINE)
-        self.assertTrue(records, "ATTRIBUTION.md contains no SHA-256 records")
-        for expected, relative_path in records:
-            asset_path = OBJECT_ROOT / relative_path
-            self.assertTrue(asset_path.is_file(), asset_path)
-            actual = hashlib.sha256(asset_path.read_bytes()).hexdigest()
-            self.assertEqual(actual, expected, asset_path)
+        self.assertIn("DGN 2k", attribution)
+        manifest = json.loads(QUICK_MANIFEST.read_text(encoding="utf-8"))
+        self.assertEqual(manifest["counts"]["scene_configs"], 100)
+
+    def test_expected_status_inventory_is_tied_to_fixture_manifest(self) -> None:
+        """Verify all three 100-record classification inventories and their digests."""
+        inventory = json.loads(EXPECTED_STATUS.read_text(encoding="utf-8"))
+
+        self.assertEqual(inventory["schema_version"], 1)
+        self.assertEqual(inventory["fixture_manifest_sha256"], sha256_file(QUICK_MANIFEST))
+        self.assertEqual(set(inventory["hands"]), {"shadow", "allegro", "leap_tac3d"})
+        for hand, hand_inventory in inventory["hands"].items():
+            with self.subTest(hand=hand):
+                records = hand_inventory["records"]
+                self.assertEqual(len(records), 100)
+                self.assertEqual(sum(hand_inventory["counts"].values()), 100)
+                self.assertEqual(hand_inventory["aggregate_sha256"], classification_digest(records))
 
     def test_active_hand_mjcf_meshes_exist(self) -> None:
         """Resolve every mesh referenced by each maintained hand MJCF."""

@@ -1,30 +1,35 @@
 # Bundled fixture sources
 
-The records in this directory are the canonical checked-in quick-start inputs for a clean checkout. Runtime outputs
-under `output/` are generated state and are not fixture sources. This fixture designation does not change the
-repository's licensing or provenance status described in the public README.
+The `dummy_arm/` tree for each maintained hand contains the canonical 100-record quick input set. Shadow, Allegro,
+and LEAP Tac3D retain the same relative scene/sample identities while preserving their hand-specific qpos and joint
+orders. The single `raw/` and `formatted/` fixtures remain separate inputs for the full four-stage example.
 
-`script/build_example_fixtures.py` remains available for a deliberate regeneration from an externally archived copy
-of the fixed formatted and dummy-arm sample. The archive is not bundled. Pass the six source roots explicitly; each
-root must be absolute and must directly contain the following fixed relative path:
+The accepted quick sources are:
 
 ```text
-core_bottle_15787789482f045d8add95bf56d3d2fa/tabletop_ur10e/scale006_pose004_0/partial_pc_00_6.npy
+output/learn_dummy_arm_shadow/graspdata
+output/learn_dummy_arm_allegro/graspdata
+output/learn_dummy_arm_leap_tac3d/graspdata
 ```
 
-Example invocation:
+`script/build_example_fixtures.py` validates all 300 records before replacing tracked destinations, converts them to
+schema v1 without changing scientific arrays, copies the exact referenced DGN subset, retargets the one-sample full
+fixtures to the deduplicated bottle, and writes `examples/quick_manifest.json`.
 
 ```bash
-python script/build_example_fixtures.py \
-  --formatted-root shadow=/archive/formatted/learn_shadow/graspdata \
-  --formatted-root allegro=/archive/formatted/learn_allegro/graspdata \
-  --formatted-root leap_tac3d=/archive/formatted/learn_leap_tac3d/graspdata \
-  --dummy-arm-root shadow=/archive/dummy-arm/learn_dummy_arm_shadow/graspdata \
-  --dummy-arm-root allegro=/archive/dummy-arm/learn_dummy_arm_allegro/graspdata \
-  --dummy-arm-root leap_tac3d=/archive/dummy-arm/learn_dummy_arm_leap_tac3d/graspdata \
-  --destination-root /path/to/ada-grasp-ctrl/examples/data
+PYTHONPATH=src python script/build_example_fixtures.py \
+  --dummy-arm-root shadow=/absolute/path/to/output/learn_dummy_arm_shadow/graspdata \
+  --dummy-arm-root allegro=/absolute/path/to/output/learn_dummy_arm_allegro/graspdata \
+  --dummy-arm-root leap_tac3d=/absolute/path/to/output/learn_dummy_arm_leap_tac3d/graspdata \
+  --dgn-root /absolute/path/to/assets/object/DGN_2k
 ```
 
-The builder validates all six roots and records before writing any destination. Regeneration is an explicit
-provenance-sensitive maintenance action: inspect the fixture diff and run all three full examples before committing
-changed `.npy` records.
+The builder follows the external DGN source and copies real files; it never writes the workstation symlink into the
+checkout. Verify a generated or checked-in tree with:
+
+```bash
+PYTHONPATH=src python script/audit_example_fixtures.py --manifest examples/quick_manifest.json
+```
+
+The manifest records every bundled grasp, scene configuration, processed-object dependency, file size, SHA-256 value,
+object ID, count, and aggregate digest. Runtime output under `output/` is generated state and is never a fixture source.

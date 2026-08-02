@@ -40,7 +40,35 @@ jobs:
           python -m compileall -q src tests
           python -m unittest discover -s tests -v
           python src/main.py --help
-      - name: Shadow headless smoke
+
+  quick:
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        hand: [shadow, allegro, leap_tac3d]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-file: environment.yml
+          cache-environment: true
+          cache-downloads: true
+          init-shell: bash
+      - name: Run and validate bundled quick set
         env:
+          ADA_GRASP_CTRL_EXAMPLE_BASE: ${{ github.workspace }}/quick-output
+          ADA_GRASP_CTRL_RUN_ID: ci-${{ matrix.hand }}
           MPLCONFIGDIR: /tmp/ada_grasp_ctrl_mpl
-        run: bash script/run_example.sh shadow quick
+        run: |
+          status=0
+          bash script/run_example.sh "${{ matrix.hand }}" quick || status=$?
+          if (( status > 1 )); then exit "${status}"; fi
+          python script/validate_quick_results.py verify \
+            --manifest examples/quick_manifest.json \
+            --expected examples/quick_expected_status.json \
+            --hand "${{ matrix.hand }}" \
+            --output-root "${ADA_GRASP_CTRL_EXAMPLE_BASE}/${{ matrix.hand }}/${ADA_GRASP_CTRL_RUN_ID}"

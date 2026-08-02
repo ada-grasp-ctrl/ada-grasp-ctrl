@@ -7,9 +7,10 @@ Load this note for asset changes, attribution, deletion, or public-release wordi
 - Allegro uses project-maintained XML plus meshes from the pinned MuJoCo Menagerie Allegro asset with BSD-2-Clause evidence.
 - Shadow uses project-maintained XML plus meshes from the pinned MuJoCo Menagerie Shadow asset with Apache-2.0 evidence.
 - LEAP Tac3D uses local XML and STL files. The repository does not currently record the provider, import commit, copyright holder, license, or Tac3D modification/redistribution permission for those local meshes. The Menagerie LEAP Hand MIT license is context, not proof that it covers this asset set.
-- The bundled DGN/BODex bottle fixture has source links and checksums, but the authorizing party, authorization date, redistribution scope/conditions, and primary message/ticket/reference are not recorded.
+- The bundled quick data uses an exact 89-object subset from the original DGN 2k collection. Its source and complete
+  file checksums are recorded by the DGN attribution and `examples/quick_manifest.json`.
 
-These gaps block a claim of fully audited public redistribution even though the technical release gates can pass.
+The retained LEAP Tac3D provenance gap is separate from the technical quick gate.
 
 ## Removed legacy assets
 
@@ -20,4 +21,6 @@ questions for the retained assets.
 
 ## Evidence expected for new or repaired provenance
 
-Record the upstream project and exact version/commit, original filename/path, copyright holder, license text/reference, project modifications, redistribution basis, import date if known, and stable checksums. For private permission, preserve the actual authorizing communication or a stable internal reference; do not paraphrase missing evidence into certainty.
+Record available upstream facts and stable checksums without turning missing metadata into certainty. For the bundled
+DGN quick subset, the accepted record is the original DGN 2k source, the subset operation, and the machine-readable
+manifest. Preserve more detailed primary records when they are available.

@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 from omegaconf import OmegaConf
@@ -19,6 +20,8 @@ import yaml
 from ada_grasp_ctrl.errors import PreflightError
 from ada_grasp_ctrl.tasks.control_stat import _discover_control_paths, _reported_control_paths
 from script.report_example import ReportError, summarize
+from script.build_example_fixtures import sha256_file
+from script.validate_quick_results import QuickResultError, collect_run_classifications, verify_expected_inventory
 
 
 class ReleaseFlowTest(unittest.TestCase):
@@ -233,7 +236,8 @@ class ReleaseFlowTest(unittest.TestCase):
             summarize(self.root)
 
         rendered = output.getvalue()
-        self.assertIn("current_dist_0.npy", rendered)
+        self.assertIn("control_outputs=1", rendered)
+        self.assertIn("episode_statuses={'completed': 1}", rendered)
         self.assertNotIn("stale_dist_0.npy", rendered)
         self.assertIn("success_rate=1.0", rendered)
 
@@ -379,6 +383,157 @@ class ReleaseFlowTest(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 2, completed.stderr)
         self.assertIn("not empty", completed.stderr)
+
+    def test_release_gate_exposes_only_quick(self) -> None:
+        """Reject every removed maintained gate choice before creating artifacts."""
+        for gate in ("fixed", "wheel", "portable", "release300", "all"):
+            with self.subTest(gate=gate):
+                completed = subprocess.run(
+                    ["bash", "script/run_release_gate.sh", gate],
+                    cwd=Path(__file__).resolve().parents[1],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+
+                self.assertEqual(completed.returncode, 2, completed.stderr)
+                self.assertIn("Usage: bash script/run_release_gate.sh quick", completed.stderr)
+
+
+class QuickResultInventoryTest(unittest.TestCase):
+    """Protect exact per-sample quick classification comparisons."""
+
+    def setUp(self) -> None:
+        """Create a two-sample current-run fixture.
+
+        Returns:
+            None.
+        """
+        self.temporary = tempfile.TemporaryDirectory()
+        self.project_root = Path(self.temporary.name)
+        self.hand = "shadow"
+        self.input_root = self.project_root / "examples/data/shadow/dummy_arm"
+        self.output_root = self.project_root / "run"
+        relative_paths = (
+            "object_a/tabletop_ur10e/scene_a/sample_a.npy",
+            "object_b/tabletop_ur10e/scene_b/sample_b.npy",
+        )
+        for relative in relative_paths:
+            path = self.input_root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"input")
+        manifest = {
+            "schema_version": 1,
+            "hands": {
+                hand: {"records": [{"source_relative_path": relative} for relative in relative_paths]}
+                for hand in ("shadow", "allegro", "leap_tac3d")
+            },
+        }
+        self.manifest_path = self.project_root / "examples/quick_manifest.json"
+        self.manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        self.manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+        control_root = self.output_root / "control/ours_default"
+        control_root.mkdir(parents=True)
+        inputs = [self.input_root / relative for relative in relative_paths]
+        outputs = [control_root / f"sample_{index}_dist_0_pos_0.npy" for index in range(2)]
+        for output in outputs:
+            output.write_bytes(b"control")
+        eval_log = self.output_root / "log/control_eval"
+        eval_log.mkdir(parents=True)
+        (eval_log / "run_manifest.yaml").write_text(
+            yaml.safe_dump({"inputs": [str(path) for path in inputs]}),
+            encoding="utf-8",
+        )
+        (eval_log / "run_report.json").write_text(
+            json.dumps(
+                {
+                    "task": "control_eval",
+                    "num_discovered": 2,
+                    "num_processed": 2,
+                    "num_skipped": 0,
+                    "results": [
+                        {
+                            "input_path": str(input_path),
+                            "output_paths": [str(output_path)],
+                            "status": "completed",
+                        }
+                        for input_path, output_path in zip(inputs, outputs)
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        stat_log = self.output_root / "log/control_stat"
+        stat_log.mkdir(parents=True)
+        (stat_log / "run_report.json").write_text(
+            json.dumps(
+                {
+                    "task": "control_stat",
+                    "num_discovered": 2,
+                    "num_processed": 2,
+                    "results": [{"input_path": str(path)} for path in outputs],
+                }
+            ),
+            encoding="utf-8",
+        )
+        statistics_root = self.output_root / "control_stat_res"
+        statistics_root.mkdir()
+        self.statistics_path = statistics_root / "dist_0_ours_default.yaml"
+        self.statistics_path.write_text(
+            yaml.safe_dump(
+                {
+                    "num_total": 2,
+                    "success": 1,
+                    "failure": 1,
+                    "invalid_initialization": 0,
+                    "solver_degraded": 0,
+                    "execution_error": 0,
+                    "sample_status": [
+                        {
+                            "path": str(outputs[0]),
+                            "status": "completed",
+                            "scientific_outcome": "success",
+                        },
+                        {
+                            "path": str(outputs[1]),
+                            "status": "completed",
+                            "scientific_outcome": "failure",
+                        },
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    def tearDown(self) -> None:
+        """Release the isolated current-run fixture.
+
+        Returns:
+            None.
+        """
+        self.temporary.cleanup()
+
+    def test_expected_inventory_accepts_exact_classifications_and_rejects_drift(self) -> None:
+        """Tie expected statuses to the fixture manifest and exact sample identities."""
+        with patch("script.validate_quick_results.EXPECTED_COUNT", 2):
+            current = collect_run_classifications(self.hand, self.output_root, self.manifest_path)
+            expected = {
+                "schema_version": 1,
+                "fixture_manifest_sha256": sha256_file(self.manifest_path),
+                "hands": {hand: current for hand in ("shadow", "allegro", "leap_tac3d")},
+            }
+            expected_path = self.project_root / "examples/quick_expected_status.json"
+            expected_path.write_text(json.dumps(expected), encoding="utf-8")
+            verify_expected_inventory(self.hand, self.output_root, self.manifest_path, expected_path)
+
+            statistics = yaml.safe_load(self.statistics_path.read_text(encoding="utf-8"))
+            statistics["sample_status"][0]["scientific_outcome"] = "failure"
+            statistics["success"] = 0
+            statistics["failure"] = 2
+            self.statistics_path.write_text(yaml.safe_dump(statistics), encoding="utf-8")
+            with self.assertRaisesRegex(QuickResultError, "differ from the expected inventory"):
+                verify_expected_inventory(self.hand, self.output_root, self.manifest_path, expected_path)
 
 
 if __name__ == "__main__":

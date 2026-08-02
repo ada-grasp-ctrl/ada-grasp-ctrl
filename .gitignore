@@ -28,7 +28,7 @@ env/
 # Runtime outputs and externally restored data
 output/
 release/golden/
-assets/object/
+assets/object
 
 # Exact MuJoCo and debug artifacts
 MUJOCO_LOG.TXT

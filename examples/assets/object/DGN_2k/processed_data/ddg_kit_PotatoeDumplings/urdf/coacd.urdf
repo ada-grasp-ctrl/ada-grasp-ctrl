@@ -1,0 +1,19 @@
+<robot name="root">
+  <link name="link_convex_piece_000.obj">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/convex_piece_000.obj" scale="1.0 1.0 1.0"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/convex_piece_000.obj" scale="1.0 1.0 1.0"/>
+      </geometry>
+    </collision>
+  </link>
+</robot>

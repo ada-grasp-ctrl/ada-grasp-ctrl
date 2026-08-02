@@ -1,0 +1,2 @@
+# Preserve bundled upstream mesh bytes and keep generated geometry out of text diffs.
+examples/assets/object/DGN_2k/**/*.obj -text -diff

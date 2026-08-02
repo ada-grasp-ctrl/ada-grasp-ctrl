@@ -1,5 +1,7 @@
 """Print a compact status summary for one example output directory."""
 
+import argparse
+from collections import Counter
 import json
 from pathlib import Path
 import sys
@@ -33,11 +35,12 @@ def _load_json_mapping(path: Path) -> dict[str, object]:
     return value
 
 
-def _reported_control_paths(output_root: Path) -> list[Path]:
+def _reported_control_paths(output_root: Path, expected_count: int | None = None) -> list[Path]:
     """Return only outputs declared by this run's control-eval report.
 
     Args:
         output_root: Unique example run directory.
+        expected_count: Optional exact current-run input and output count.
 
     Returns:
         Sorted control output paths.
@@ -49,6 +52,14 @@ def _reported_control_paths(output_root: Path) -> list[Path]:
     report = _load_json_mapping(report_path)
     if report.get("task") != "control_eval" or not isinstance(report.get("results"), list):
         raise ReportError(f"Invalid control-eval report contract: {report_path}")
+    if expected_count is not None:
+        for field in ("num_discovered", "num_processed"):
+            if report.get(field) != expected_count:
+                raise ReportError(f"Control-eval report {field}={report.get(field)!r}, expected {expected_count}.")
+        if report.get("num_skipped") != 0 or len(report["results"]) != expected_count:
+            raise ReportError(
+                f"Control-eval report must contain exactly {expected_count} current results: {report_path}"
+            )
     control_root = (output_root / "control").resolve(strict=False)
     paths: set[Path] = set()
     for index, result in enumerate(report["results"]):
@@ -68,6 +79,10 @@ def _reported_control_paths(output_root: Path) -> list[Path]:
             paths.add(candidate)
     if not paths:
         raise ReportError(f"Control-eval report declares no output files: {report_path}")
+    if expected_count is not None and len(paths) != expected_count:
+        raise ReportError(
+            f"Control-eval report declares {len(paths)} outputs, expected {expected_count}: {report_path}"
+        )
     return sorted(paths)
 
 
@@ -159,11 +174,12 @@ def _validate_statistics(statistics: object, path: Path, expected_count: int) ->
     return statistics
 
 
-def summarize(output_root: Path) -> None:
+def summarize(output_root: Path, expected_count: int | None = None) -> None:
     """Print episode statuses, lift outcome, and statistics location.
 
     Args:
         output_root: Example output directory.
+        expected_count: Optional exact number of current-run control outputs.
 
     Returns:
         None.
@@ -171,8 +187,9 @@ def summarize(output_root: Path) -> None:
     Raises:
         ReportError: If required current-run reports or outputs are missing.
     """
-    control_paths = _reported_control_paths(output_root)
-    episode_lines: list[str] = []
+    control_paths = _reported_control_paths(output_root, expected_count)
+    episode_statuses: Counter[str] = Counter()
+    lifted_count = 0
     for path in control_paths:
         try:
             record = np.load(path, allow_pickle=True).item()
@@ -180,12 +197,11 @@ def summarize(output_root: Path) -> None:
             raise ReportError(f"Cannot read control output {path}: {error}") from error
         if not isinstance(record, dict):
             raise ReportError(f"Control output is not a mapping: {path}")
-        status = record.get("episode_status", "legacy")
+        status = str(record.get("episode_status", "legacy"))
+        episode_statuses[status] += 1
         poses = np.asarray(record.get("obj_pose", []))
-        lifted = None
         if len(poses) >= 2:
-            lifted = bool(poses[-1, 2] - poses[0, 2] > 0.1)
-        episode_lines.append(f"episode={path.relative_to(output_root)} status={status} lifted={lifted}")
+            lifted_count += int(poses[-1, 2] - poses[0, 2] > 0.1)
     stat_report_path = output_root / "log" / "control_stat" / "run_report.json"
     stat_report = _load_json_mapping(stat_report_path)
     _validate_stat_report(stat_report, stat_report_path, control_paths)
@@ -204,12 +220,28 @@ def summarize(output_root: Path) -> None:
 
     # Emit nothing until every current-run artifact has passed validation, so
     # a stale or partial report cannot leave a misleading success-like prefix.
-    for line in episode_lines:
-        print(line)
+    print(
+        f"control_outputs={len(control_paths)} episode_statuses={dict(sorted(episode_statuses.items()))} "
+        f"lifted={lifted_count}"
+    )
     print(
         f"statistics={statistics_path} success_rate={statistics.get('success_rate')} "
-        f"valid={statistics.get('num_valid_cases')}"
+        f"success={statistics.get('success')} failure={statistics.get('failure')} "
+        f"invalid={statistics.get('invalid_initialization')} degraded={statistics.get('solver_degraded')} "
+        f"errors={statistics.get('execution_error')} valid={statistics.get('num_valid_cases')}"
     )
+
+
+def _argument_parser() -> argparse.ArgumentParser:
+    """Create the report command-line parser.
+
+    Returns:
+        Configured parser.
+    """
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("output_root", type=Path)
+    parser.add_argument("--expected-count", type=int)
+    return parser
 
 
 def main() -> None:
@@ -218,10 +250,11 @@ def main() -> None:
     Returns:
         None.
     """
-    if len(sys.argv) != 2:
-        raise SystemExit("Usage: report_example.py <output-root>")
+    arguments = _argument_parser().parse_args()
+    if arguments.expected_count is not None and arguments.expected_count <= 0:
+        raise SystemExit("--expected-count must be positive")
     try:
-        summarize(Path(sys.argv[1]).resolve())
+        summarize(arguments.output_root.resolve(), arguments.expected_count)
     except ReportError as error:
         print(f"example report failed: {error}", file=sys.stderr)
         raise SystemExit(1) from None

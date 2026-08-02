@@ -65,18 +65,28 @@ case "${run_id}" in
 esac
 example_base="${ADA_GRASP_CTRL_EXAMPLE_BASE:-${project_root}/output/examples}"
 example_root="${example_base}/${hand}/${run_id}"
+fixture_root="${project_root}/examples/data/${hand}"
+fixture_manifest="${project_root}/examples/quick_manifest.json"
+if [[ "${mode}" == "quick" ]]; then
+  expected_count=100
+  if ! "${python_bin}" script/audit_example_fixtures.py --manifest "${fixture_manifest}" --hand "${hand}"; then
+    echo "Bundled quick fixture audit failed for ${hand}." >&2
+    exit 2
+  fi
+else
+  expected_count=1
+  object_info="${project_root}/examples/assets/object/DGN_2k/processed_data/core_bottle_15787789482f045d8add95bf56d3d2fa/info/simplified.json"
+  if [[ ! -f "${object_info}" ]]; then
+    echo "Bundled full-example object is missing: ${object_info}" >&2
+    exit 2
+  fi
+fi
 if [[ -e "${example_root}" || -L "${example_root}" ]]; then
   echo "Example run directory already exists; choose a new ADA_GRASP_CTRL_RUN_ID: ${example_root}" >&2
   exit 2
 fi
 if ! mkdir -p "${example_root}"; then
   echo "Cannot create example run directory: ${example_root}" >&2
-  exit 2
-fi
-fixture_root="${project_root}/examples/data/${hand}"
-object_info="${project_root}/examples/assets/object/core_bottle_15787789482f045d8add95bf56d3d2fa/info/simplified.json"
-if [[ ! -f "${object_info}" ]]; then
-  echo "Bundled example object is missing: ${object_info}" >&2
   exit 2
 fi
 
@@ -131,7 +141,7 @@ run_stage control_stat "${python_bin}" src/main.py \
   log_dir="${example_root}/log/control_stat" task.method=ours task.setting_name=dist_0 \
   task.input_report="${example_root}/log/control_eval/run_report.json"
 
-run_stage report "${python_bin}" script/report_example.py "${example_root}"
+run_stage report "${python_bin}" script/report_example.py "${example_root}" --expected-count "${expected_count}"
 echo "[ada-grasp-ctrl] run_id: ${run_id}"
 echo "[ada-grasp-ctrl] outputs: ${example_root}"
 exit "${overall_status}"

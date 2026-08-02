@@ -715,10 +715,9 @@ class PipelineContractTest(unittest.TestCase):
             f"log_dir={missing_asset_root / 'log'}",
         )
 
-        project_grasp = np.load(
-            project_root / "examples" / "data" / "shadow" / "dummy_arm" / "grasp.npy",
-            allow_pickle=True,
-        ).item()
+        project_grasp_paths = sorted((project_root / "examples/data/shadow/dummy_arm").rglob("*.npy"))
+        self.assertEqual(len(project_grasp_paths), 100)
+        project_grasp = np.load(project_grasp_paths[0], allow_pickle=True).item()
         missing_object_root = self.root / "missing_object"
         missing_object_grasp_dir = missing_object_root / "grasp"
         missing_object_grasp_dir.mkdir(parents=True)

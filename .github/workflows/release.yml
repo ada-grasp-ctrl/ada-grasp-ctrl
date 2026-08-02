@@ -2,32 +2,18 @@ name: Release gates
 
 on:
   workflow_dispatch:
-    inputs:
-      gate:
-        description: Release gate to execute
-        required: true
-        default: portable
-        type: choice
-        options:
-          - quick
-          - fixed
-          - wheel
-          - portable
-          - release300
-          - all
-      release_input_root:
-        description: Absolute self-hosted path containing learn_dummy_arm_<hand>/graspdata
-        required: false
-        type: string
 
 defaults:
   run:
     shell: bash -leo pipefail {0}
 
 jobs:
-  portable:
-    if: ${{ inputs.gate != 'release300' }}
+  quick:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        hand: [shadow, allegro, leap_tac3d]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -42,45 +28,22 @@ jobs:
         run: |
           python -c "import sys; print(f'Python executable: {sys.executable}'); assert sys.version_info[:2] == (3, 10), sys.version"
           python -c "import ada_grasp_ctrl, mujoco, numpy, omegaconf"
-      - name: Run portable release gates
+      - name: Run quick release job
         env:
-          ADA_GRASP_CTRL_RELEASE_GATE_ROOT: ${{ github.workspace }}/release-gate-output
+          ADA_GRASP_CTRL_EXAMPLE_BASE: ${{ github.workspace }}/release-gate-output
+          ADA_GRASP_CTRL_RUN_ID: release-${{ matrix.hand }}
           MPLCONFIGDIR: /tmp/ada_grasp_ctrl_mpl
         run: |
-          selected="${{ inputs.gate }}"
-          if [[ "${selected}" == "all" ]]; then selected="portable"; fi
-          bash script/run_release_gate.sh "${selected}"
+          status=0
+          bash script/run_example.sh "${{ matrix.hand }}" quick || status=$?
+          if (( status > 1 )); then exit "${status}"; fi
+          python script/validate_quick_results.py verify \
+            --manifest examples/quick_manifest.json \
+            --expected examples/quick_expected_status.json \
+            --hand "${{ matrix.hand }}" \
+            --output-root "${ADA_GRASP_CTRL_EXAMPLE_BASE}/${{ matrix.hand }}/${ADA_GRASP_CTRL_RUN_ID}"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: portable-release-gate-${{ inputs.gate }}
-          path: release-gate-output
-
-  release300:
-    if: ${{ inputs.gate == 'release300' || inputs.gate == 'all' }}
-    runs-on: self-hosted
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-      - uses: mamba-org/setup-micromamba@v2
-        with:
-          environment-file: environment.yml
-          cache-environment: true
-          cache-downloads: true
-          init-shell: bash
-      - name: Verify project environment
-        run: |
-          python -c "import sys; print(f'Python executable: {sys.executable}'); assert sys.version_info[:2] == (3, 10), sys.version"
-          python -c "import ada_grasp_ctrl, mujoco, numpy, omegaconf"
-      - name: Run 300-episode release gate
-        env:
-          ADA_GRASP_CTRL_RELEASE_GATE_ROOT: ${{ github.workspace }}/release-gate-output
-          ADA_GRASP_CTRL_RELEASE_INPUT_ROOT: ${{ inputs.release_input_root }}
-          MPLCONFIGDIR: /tmp/ada_grasp_ctrl_mpl
-        run: bash script/run_release_gate.sh release300
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: release300-gate
-          path: release-gate-output
+          name: quick-release-${{ matrix.hand }}
+          path: release-gate-output/${{ matrix.hand }}/release-${{ matrix.hand }}

@@ -14,12 +14,14 @@ is using them:
 
 Do not treat every ignored path as disposable. Archive research evidence externally before any manual cleanup,
 including `output/experiments/`, historical `output/learn_*` and `output/retest_*` trees, or any custom output root
-whose manifests, reports, statistics, or trajectories may be needed for a paper or comparison. The externally
-restored `release/golden/` tree is approved evidence rather than a cache. `assets/object/` is the local external BODex
-object-data location and may be expensive to restore.
+whose manifests, reports, statistics, or trajectories may be needed for a paper or comparison. Historical external
+comparison evidence under `release/golden/` is not part of the maintained quick gate. `assets/object/` remains the
+local external DGN/BODex data location and may be expensive to restore.
 
-The checked-in quick-start fixtures under `examples/data/` are source artifacts, not generated runtime output. Their
-external regeneration workflow is documented in [the fixture source record](../examples/data/README.md).
+The checked-in 3x100 quick fixtures under `examples/data/`, the selected DGN files under
+`examples/assets/object/DGN_2k/`, and `examples/quick_manifest.json` are source artifacts rather than generated runtime
+output. Their regeneration and audit workflow is documented in
+[the fixture source record](../examples/data/README.md).
 
 Historical records under `agents/tasks/` are retained as maintained audit documentation. They are non-normative and
 may describe obsolete behavior; current rules, code, tests, and the public README take precedence. New transient tool

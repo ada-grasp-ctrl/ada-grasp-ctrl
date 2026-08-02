@@ -43,8 +43,7 @@ git submodule update --init --recursive
 
 ## Quick start
 
-The bundled quick and full examples use the minimal object asset included under `examples/assets/object/`. They do
-not require the external DGN 2k object download described later.
+The bundled quick examples use 100 precomputed dummy-arm grasps per hand. The full example retains its single raw/formatted input and uses the same bundled object tree. Neither mode requires the external DGN 2k download described later.
 
 Run the bundled Shadow example headlessly:
 
@@ -52,8 +51,8 @@ Run the bundled Shadow example headlessly:
 bash script/run_example.sh shadow quick
 ```
 
-Quick mode uses a precomputed dummy-arm grasp and runs `control_eval -> control_stat`. The other supported hands use
-the same command:
+Quick mode runs `control_eval -> control_stat` serially over exactly 100 precomputed dummy-arm grasps with the `ours`
+controller. The other supported hands use the same command:
 
 ```bash
 bash script/run_example.sh allegro quick
@@ -73,9 +72,6 @@ To run all four stages from the bundled raw Learning fixture:
 ```bash
 bash script/run_example.sh shadow full
 ```
-
-Each example creates a new directory under `output/examples/<hand>/` and prints the final output path and result
-summary.
 
 ## Object preparation for external BODex data
 
@@ -109,9 +105,11 @@ The broader grasp-generation and evaluation workflow follows the original projec
 3. Use DexLearn to sample grasp poses from single-view point clouds.
 4. Use this repository to format those grasps and evaluate grasp-execution methods.
 
-This repository maintains the four evaluation stages below. Run the commands from the repository root, use the same
-`exp_name`, `output_root`, and data root throughout, and replace `shadow` with another supported hand as described in
-the hand-name table.
+This repository maintains the four evaluation stages below. Run the commands from the repository root and use the
+same `exp_name` throughout. By default, outputs go to `output/`, and relative data paths resolve from the repository
+root. Set `data_root` only when records reference paths relative to an external dataset root, and override
+`output_root` only when a different output location is needed. Replace `shadow` with another supported hand as
+described in the hand-name table.
 
 ### 1. Format raw grasps
 
@@ -119,8 +117,6 @@ Convert raw BODex or DexLearn records into the common grasp record used by the l
 
 ```bash
 python src/main.py setting=tabletop hand=shadow task=format exp_name=learn \
-  output_root=/absolute/path/to/output data_root=/absolute/path/to/data \
-  log_dir=/absolute/path/to/output/log/format \
   task.data_name=Learning task.data_path=/absolute/path/to/raw_grasps \
   task.max_num=-1
 ```
@@ -141,8 +137,6 @@ dummy-arm joint positions to each hand configuration.
 
 ```bash
 python src/main.py setting=tabletop hand=shadow task=dummy_arm_qpos exp_name=learn \
-  output_root=/absolute/path/to/output data_root=/absolute/path/to/data \
-  log_dir=/absolute/path/to/output/log/dummy_arm_qpos \
   task.device=cuda:0 task.max_num=-1
 ```
 
@@ -155,9 +149,8 @@ Run one of the maintained execution methods and save the simulated manipulation 
 
 ```bash
 python src/main.py setting=tabletop hand=dummy_arm_shadow task=control_eval exp_name=learn \
-  output_root=/absolute/path/to/output data_root=/absolute/path/to/data \
-  log_dir=/absolute/path/to/output/log/control_eval \
-  task.method=ours task.input_data=grasp_dir task.max_num=-1 \
+  log_dir=learn_dummy_arm_shadow/log/control_eval \
+  task.method=ours task.max_num=-1 \
   task.offsets='[0.0]' task.debug_viewer=false
 ```
 
@@ -167,7 +160,6 @@ Key options:
 - `task.offsets`: planar object-position perturbation distances in metres. Zero evaluates one deterministic pose;
   every nonzero distance evaluates eight planar directions. The commonly used `[0.0]` and `[0.02]` settings produce
   `dist_0` and `dist_2` result groups, respectively.
-- `task.input_data`: configuration field containing the input directory; the maintained pipeline uses `grasp_dir`.
 - `task.debug_viewer`: set to `true` to run samples serially with a viewer. On a headless server, also set
   `task.debug_viewer_backend=mjviser` and open the printed browser URL.
 
@@ -178,10 +170,8 @@ an older output tree:
 
 ```bash
 python src/main.py setting=tabletop hand=dummy_arm_shadow task=control_stat exp_name=learn \
-  output_root=/absolute/path/to/output data_root=/absolute/path/to/data \
-  log_dir=/absolute/path/to/output/log/control_stat \
   task.method=ours task.setting_name=dist_0 \
-  task.input_report=/absolute/path/to/output/log/control_eval/run_report.json
+  task.input_report=learn_dummy_arm_shadow/log/control_eval/run_report.json
 ```
 
 Set `task.setting_name=dist_2` when summarizing the `[0.02]` perturbation outputs. Statistics distinguish successful
@@ -265,9 +255,9 @@ the authors for their great work.
 
 - [Implementation notes](docs/practical-modifications-in-implementation.md)
 - [Repository hygiene and local-data retention](docs/repository-hygiene.md)
-- [Example object attribution](examples/assets/object/core_bottle_15787789482f045d8add95bf56d3d2fa/ATTRIBUTION.md)
+- [Bundled DGN subset attribution](examples/assets/object/DGN_2k/ATTRIBUTION.md)
 - [Hand asset audit](assets/hand/README.md)
 
 This repository currently provides no project-wide license for project-owned source. Third-party submodules, hand
-assets, and bundled data remain subject to their own licenses and attribution. The example-object authorization record
-and local LEAP Tac3D mesh provenance remain unresolved for public redistribution; see the linked audits.
+assets, and bundled data retain their recorded sources and attribution. Local LEAP Tac3D mesh provenance remains
+incomplete; see the linked hand-asset audit.

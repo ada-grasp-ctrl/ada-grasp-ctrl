@@ -1,41 +1,48 @@
 # Testing and Release Rules
 
-Apply this rule to tests, CI, quick examples, benchmarks, golden comparisons, release artifacts, and performance claims.
+Apply this rule to tests, CI, quick examples, benchmarks, trajectory comparisons, release artifacts, and performance
+claims.
 
 ## Validation ladder
 
-- Run the smallest relevant unit/schema test first. Then run the full unit suite for shared runtime, schema, controller, or batch changes.
-- Run Ruff and compile checks for Python changes. Use the exact canonical commands from `AGENTS.md`/`README.md` rather than inventing a parallel test workflow.
+- Run the smallest relevant unit/schema test first. Then run the full unit suite for shared runtime, schema,
+  controller, or batch changes.
+- Run Ruff and compile checks for Python changes. Use the exact canonical commands from `AGENTS.md`/`README.md` rather
+  than inventing a parallel test workflow.
 - Use a quick example when the change reaches MuJoCo, assets, CLI composition, runtime roots, or end-to-end reports.
-- Use a release gate when the change can affect trajectories, contacts, classifications, wheel isolation, the supported matrix, or release automation.
-- Use unique empty output roots for integration/release work. Never accept a gate that consumed stale or untracked outputs.
+- Use the maintained quick gate when the change can affect trajectories, contacts, classifications, the supported
+  matrix, bundled fixtures, or release automation.
+- Use unique empty output roots for integration/release work. Never accept a gate that consumed stale or untracked
+  outputs.
 
-## Golden comparison
+## Trajectory comparison
 
-- Compare keys, shapes, stage sequences, contact count/order, episode classifications, and floating trajectories. Timing fields and explicitly approved additive metadata may be excluded.
-- The promoted numeric tolerances are `rtol=1e-5` and `atol=1e-6`; do not loosen them without approval.
-- Process exit code alone is not scientific validation. Inspect batch reports, statistics, comparison reports, and manifests.
-- Never replace promoted trajectories to conceal an unexplained mismatch. Classify the difference, find its first cause, and fix unintended regressions.
-- Golden promotion or any accepted classification change requires maintainer approval plus updated machine-readable audit evidence and human-readable rationale.
-- Reproducibility claims require two clean runs with the same commit, dependencies, inputs, seed, worker count, and resolved config.
+- Generic comparison utilities may compare keys, shapes, stage sequences, contact count/order, episode
+  classifications, and floating trajectories. Timing fields and explicitly approved additive metadata may be
+  excluded.
+- The retained numeric tolerances are `rtol=1e-5` and `atol=1e-6`; do not loosen them without approval.
+- Process exit code alone is not scientific validation. Inspect batch reports, statistics, comparison reports, and
+  manifests.
+- Never replace trajectory evidence to conceal an unexplained mismatch. Classify the difference, find its first cause,
+  and fix unintended regressions.
+- Reproducibility claims require two clean runs with the same commit, dependencies, inputs, seed, worker count, and
+  resolved config.
 
-## Maintained gates
+## Maintained gate
 
-Golden trajectories and their audit artifact are not bundled in the repository. The fixed-matrix and portable gates
-require an explicitly restored, approved `release/golden/` tree before they can run.
+The only maintained release gate is the self-contained bundled quick set:
 
 ```bash
-# Portable gate after restoring approved golden evidence: three quick examples, 15-case fixed matrix, and isolated wheel mode.
-PYTHON_BIN=python bash script/run_release_gate.sh portable
-
-# External 300-case release gate.
-ADA_GRASP_CTRL_RELEASE_INPUT_ROOT=/absolute/path/to/release-inputs \
-  PYTHON_BIN=python bash script/run_release_gate.sh release300
+PYTHON_BIN=python bash script/run_release_gate.sh quick
 ```
 
-Do not run the expensive `release300` gate unless the task needs it and the recorded external input tree is available. Do not claim it passed from the checked-in audit alone.
+It audits the 3x100 fixtures and exact 89-object subset, runs every hand serially with `ours`, and verifies each fresh
+classification against `examples/quick_expected_status.json`. A documented batch exit code `1` is acceptable only when
+the complete current-run reports and classifications match that inventory. Missing outputs, execution errors,
+solver-degradation drift, stale reports, count mismatches, or input/asset drift fail the gate.
 
 ## Load on demand
 
-- Read [../knowledge/testing-release.md](../knowledge/testing-release.md) for CI/release coverage, baseline meaning, and failure triage.
-- Read [../knowledge/runtime-data-contracts.md](../knowledge/runtime-data-contracts.md) when interpreting manifests, reports, statuses, or exit codes.
+- Read [../knowledge/testing-release.md](../knowledge/testing-release.md) for CI coverage and quick-result triage.
+- Read [../knowledge/runtime-data-contracts.md](../knowledge/runtime-data-contracts.md) when interpreting manifests,
+  reports, statuses, or exit codes.
