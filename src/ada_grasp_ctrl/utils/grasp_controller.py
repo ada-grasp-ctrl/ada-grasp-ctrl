@@ -505,13 +505,16 @@ class GraspController:
             body_jaco_f = body_jaco_f_lst[i]
             body_jaco_a = body_jaco_a_lst[i]
             contact_jaco_f = cf_local.T @ Trans @ body_jaco_f
-            contact_jaco_a = cf_local.T @ Trans @ body_jaco_a
 
             if self.jaco_reference_frame:
-                # adjust J(qd) to be defined in the local contact frame of q;
-                # otherwise, it is in the local contact frame of qd.
-                delta_rot = pose_f_lst[i][:3, :3].T @ pose_a_lst[i][:3, :3]
-                contact_jaco_a = delta_rot @ contact_jaco_a
+                # Express J(qd) in the current contact frame. The point velocity
+                # starts in the desired body frame, is transported to the current
+                # body frame, and is finally rotated into the contact frame.
+                desired_to_current_body = pose_f_lst[i][:3, :3].T @ pose_a_lst[i][:3, :3]
+                contact_jaco_a = cf_local.T @ desired_to_current_body @ Trans @ body_jaco_a
+            else:
+                # Keep the contact frame rigidly attached to the desired body.
+                contact_jaco_a = cf_local.T @ Trans @ body_jaco_a
 
             c["jaco_a"], c["jaco_f"] = contact_jaco_a, contact_jaco_f
             c["jaco_ha"], c["jaco_hf"] = contact_jaco_a[:, -hand_ndoa:], contact_jaco_f[:, -hand_ndoa:]
