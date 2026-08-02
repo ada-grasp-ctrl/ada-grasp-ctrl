@@ -20,7 +20,6 @@ The public support matrix is Shadow, Allegro, and LEAP Tac3D hands; `ours`, `op`
 - `script/`: examples, golden comparison/audit tools, visualization, and release gates.
 - `examples/`: redistributable quick-start fixtures and their attribution records.
 - `assets/hand/`: project-maintained hand MJCF and local meshes; provenance is not uniformly complete.
-- `release/golden/`: promoted fixed-matrix trajectories and the release audit artifact.
 - `third_party/`: commit-pinned submodules. Do not edit them as ordinary project source.
 - `output/`, `build/`, caches, and task logs: generated artifacts, not source.
 
@@ -36,7 +35,7 @@ Read every rule whose task column matches. Do not bulk-read `agents/knowledge/`.
 | Tests, benchmark/eval, golden data, CI, release gates | [agents/rules/testing-release.md](agents/rules/testing-release.md) | Gate selection, comparison semantics, baseline history |
 | README, public support claims, assets, licenses, attribution | [agents/rules/documentation-assets.md](agents/rules/documentation-assets.md) | Known provenance gaps and release blockers |
 
-When a task spans domains, load all matching rules. Rules are mandatory constraints; knowledge notes are explanatory and may become stale. If a note conflicts with current code, tests, `README.md`, or `release/golden/artifact.json`, verify the current behavior and update the note rather than following it blindly.
+When a task spans domains, load all matching rules. Rules are mandatory constraints; knowledge notes are explanatory and may become stale. If a note conflicts with current code, tests, or `README.md`, verify the current behavior and update the note rather than following it blindly.
 
 ## Development entry points
 

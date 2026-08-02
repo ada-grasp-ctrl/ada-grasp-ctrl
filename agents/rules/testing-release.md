@@ -21,11 +21,11 @@ Apply this rule to tests, CI, quick examples, benchmarks, golden comparisons, re
 
 ## Maintained gates
 
-```bash
-# Audit checked-in golden evidence without running simulation.
-PYTHONPATH=src python script/audit_golden.py verify release/golden/artifact.json
+Golden trajectories and their audit artifact are not bundled in the repository. The fixed-matrix and portable gates
+require an explicitly restored, approved `release/golden/` tree before they can run.
 
-# Portable gate: three quick examples, 15-case fixed matrix, and isolated wheel mode.
+```bash
+# Portable gate after restoring approved golden evidence: three quick examples, 15-case fixed matrix, and isolated wheel mode.
 PYTHON_BIN=python bash script/run_release_gate.sh portable
 
 # External 300-case release gate.
@@ -39,4 +39,3 @@ Do not run the expensive `release300` gate unless the task needs it and the reco
 
 - Read [../knowledge/testing-release.md](../knowledge/testing-release.md) for CI/release coverage, baseline meaning, and failure triage.
 - Read [../knowledge/runtime-data-contracts.md](../knowledge/runtime-data-contracts.md) when interpreting manifests, reports, statuses, or exit codes.
-

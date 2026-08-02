@@ -243,7 +243,6 @@ the authors for their great work.
 ## References and licensing
 
 - [Implementation notes](docs/practical-modifications-in-implementation.md)
-- [Golden release evidence](release/golden/README.md)
 - [Example object attribution](examples/assets/object/core_bottle_15787789482f045d8add95bf56d3d2fa/ATTRIBUTION.md)
 - [Hand asset audit](assets/hand/README.md)
 
